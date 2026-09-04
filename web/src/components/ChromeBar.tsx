@@ -11,6 +11,10 @@ export interface ChromeBarProps {
   settingsHidden: boolean;
   onSettingsClick: () => void;
   onShareClick: () => void;
+  /** Shown only while an authenticated session is active (SPEC.md §12 M7) —
+   * absent entirely when auth isn't in play, mirroring settingsHidden's
+   * "hide the control, not just its effect" discipline. */
+  onSignOutClick?: () => void;
 }
 
 const DOT_CLASS: Record<ConnectionState, string> = {
@@ -34,6 +38,7 @@ export function ChromeBar({
   settingsHidden,
   onSettingsClick,
   onShareClick,
+  onSignOutClick,
 }: ChromeBarProps) {
   return (
     <div className="flex h-chrome shrink-0 items-center gap-3 border-b border-[var(--ditty-chrome-border)] bg-[var(--ditty-chrome-bg)] px-3 font-sans text-sm text-[#E4E7EC]">
@@ -72,7 +77,28 @@ export function ChromeBar({
       >
         <ShareIcon />
       </button>
+      {onSignOutClick && (
+        <button
+          type="button"
+          aria-label="Sign out"
+          title="Sign out"
+          onClick={onSignOutClick}
+          className="shrink-0 rounded p-1.5 text-muted-bright hover:text-[#E4E7EC] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine"
+        >
+          <SignOutIcon />
+        </button>
+      )}
     </div>
+  );
+}
+
+function SignOutIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="M16 17l5-5-5-5" />
+      <path d="M21 12H9" />
+    </svg>
   );
 }
 

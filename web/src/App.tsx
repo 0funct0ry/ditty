@@ -5,11 +5,20 @@ import { Terminal } from "./components/Terminal";
 import { ReadOnlyToast } from "./components/ReadOnlyToast";
 import { SettingsDrawer } from "./components/SettingsDrawer";
 import { ShareSheet } from "./components/ShareSheet";
+import { LoginScreen } from "./components/LoginScreen";
 import { ClosedOverlay, ConnectingOverlay, ReconnectOverlay, RejectedOverlay } from "./components/Overlays";
 import { useDittyConnection } from "./hooks/useDittyConnection";
 import { useRosterNote } from "./hooks/useRosterNote";
 import { useProfile } from "./hooks/useProfile";
+import { useAuth } from "./hooks/useAuth";
 import { resolveChromeTint, resolveTheme } from "./protocol/themes";
+import { FixtureAuthClient, fixtureAuthRequired, fixtureExpectedRole } from "./protocol/fixtureAuthClient";
+
+// Constructed once at the composition root (SPEC.md §12 M7) — App and its
+// children depend on the AuthClient interface only, so M12 can swap this
+// for a real HTTP-backed client without touching a component.
+const authClient = new FixtureAuthClient();
+const authRequired = fixtureAuthRequired();
 
 function wsURL(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -44,6 +53,7 @@ export default function App() {
 
   const rosterNote = useRosterNote(roster);
   const { profile, setProfile, resetToServerDefaults, locked } = useProfile(hello);
+  const auth = useAuth(authClient, authRequired);
   const chromeTint = resolveChromeTint(profile);
   const terminalTheme = resolveTheme(profile);
 
@@ -74,7 +84,7 @@ export default function App() {
 
   return (
     <div
-      className="flex h-full flex-col"
+      className="relative flex h-full flex-col"
       style={
         {
           "--ditty-chrome-bg": chromeTint.bg,
@@ -86,7 +96,18 @@ export default function App() {
     >
       <div aria-live="polite" className="sr-only">
         {STATE_ANNOUNCEMENT[state] ?? ""}
+        {auth.status === "gate" && authRequired ? "Sign in required" : ""}
       </div>
+      {authRequired && auth.status !== "authed" && (
+        <LoginScreen
+          sessionName={sessionName}
+          sessionTitle={sessionTitle}
+          status={auth.status}
+          error={auth.error}
+          role={fixtureExpectedRole()}
+          onSubmit={(username, password) => void auth.login(username, password)}
+        />
+      )}
       <ChromeBar
         sessionName={sessionName}
         title={sessionTitle}
@@ -96,6 +117,7 @@ export default function App() {
         settingsHidden={locked}
         onSettingsClick={() => setSettingsOpen((v) => !v)}
         onShareClick={() => setShareOpen((v) => !v)}
+        onSignOutClick={authRequired && auth.status === "authed" ? auth.logout : undefined}
       />
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <Terminal

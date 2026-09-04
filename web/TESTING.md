@@ -1,4 +1,4 @@
-# Manual testing matrix — M4 terminal core, M5 chrome & states, M6 settings & themes
+# Manual testing matrix — M4 terminal core, M5 chrome & states, M6 settings & themes, M7 login screen
 
 Run against the real fixture Hub from M3, never against manually-toggled
 mock state — that's the whole point of Phase 2 rehearsing against a real
@@ -90,3 +90,28 @@ this; a few rows need extra fixture flags as noted).
 | 380px layout | Narrow the window to 380px — the drawer becomes full-width, still overlays rather than reflowing the terminal. |
 | Screenshots | Capture the drawer open and the share sheet open at 1440px and 380px into `docs/public/screens/`. |
 | Bundle budget | `make web-build` — must stay under 400 KB gzipped; the six themes and the drawer are pure data/markup, so this shouldn't move much (SPEC.md §10.4). |
+
+## M7 — login screen (JWT UI)
+
+The real SQLite/JWT backend doesn't exist until M12 (SPEC.md §12), so this
+milestone is gated by a dev-only `FixtureAuthClient`
+(`web/src/protocol/fixtureAuthClient.ts`) driven entirely by query params —
+no fixture Hub flag or wire-protocol change is involved. `make dev-fixture
+NAME=deploy` is enough for the whole matrix; only the URL differs per row.
+
+| Check | How |
+|-------|-----|
+| Gate on load | Open the dev URL with `?auth=1` appended — confirm the login screen covers the whole app (chrome bar and terminal not reachable) before any credentials are entered. |
+| Sign in | Enter any non-empty username/password, submit — confirm the button disables and reads "Signing in…", then after ~550ms the login screen closes and the live session (chrome bar + terminal) appears, with the sign-out icon now present in the chrome bar. |
+| Sign out | Click the sign-out icon in the chrome bar — confirm it returns to the login screen (gate), and the icon is absent again until the next successful sign-in. |
+| Failed attempt | Append `&authfail=1` to the URL, submit any credentials — confirm the inline error "Incorrect username or password." appears (no exclamation, no apology), the password field clears and refocuses, and the login screen stays up. |
+| Correct credentials after failure | With `&authfail=1` still set, remove it (edit the URL) or open a fresh tab without it, then submit — confirm sign-in now succeeds normally. |
+| Lockout | With `&authfail=1` set, submit 5 times in a row — confirm the 5th attempt (and any before the 30s window elapses) shows "Too many attempts. Try again in Ns." instead of the plain incorrect-credentials message. |
+| Role plumbing | Sign in with `?auth=1&role=viewer` — confirm the footer reads "role: viewer" before sign-in, and once live the chrome bar's access badge still reflects the fixture's own `writable` flag from `Hello` (role does not itself flip write access until M12 wires it through the real Hub — SPEC.md §9). |
+| Session-target line | Confirm the login screen's `Signing in to <session> · <title>` line matches the attached fixture scenario's actual `Hello.session.name`/`title`, not a hardcoded string. |
+| No auth | Open the dev URL with no `?auth=1` — confirm the login screen never appears and the app behaves exactly as in M4–M6. |
+| Keyboard-only | Tab through the login form (username → password → sign in); Enter submits from either field; focus returns to the password field after a failed attempt. |
+| `AuthClient` boundary | `grep -n "AuthClient" web/src/components/LoginScreen.tsx web/src/components/ChromeBar.tsx web/src/hooks/useAuth.ts` — confirm these depend only on the `AuthClient`/`AuthStatus` types, never on `FixtureAuthClient` directly (only `App.tsx` constructs the concrete class). |
+| Unit tests | `make web-test` — `fixtureAuthClient.test.ts` covers success, empty/forced failure, the 5-in-a-minute lockout and its 30s expiry, and logout resetting state. |
+| Screenshots | Capture the gate, "Signing in…", inline-error, and lockout states at 1440px and 380px into `docs/public/screens/`. |
+| Bundle budget | `make web-build && make bundle-check` — must stay under 400 KB gzipped (SPEC.md §10.4). |
