@@ -8,6 +8,59 @@ body,
   height: 100%;
 }
 
+/* Chrome tint: overridden per-theme by the settings drawer (SPEC.md §7) so
+ * the chrome bar and status bar agree visually with the terminal theme.
+ * Defaults here match the ditty-dark theme in protocol/themes.ts. */
+:root {
+  --ditty-chrome-bg: #171b24;
+  --ditty-chrome-border: #2c3342;
+  --ditty-chrome-accent: #3d9c87;
+  --ditty-terminal-bg: #0e1116;
+}
+
+/* Themed scrollbars: the browser default (light, chrome-colored) scrollbar
+ * clashes with every ditty theme, dark or light. Both the terminal viewport
+ * (xterm's own `.xterm-viewport`) and the settings drawer scroll, so both
+ * pick up the current theme's colors via the CSS variables App.tsx sets. */
+.xterm-viewport,
+.settings-drawer {
+  scrollbar-color: var(--ditty-chrome-border) transparent;
+}
+.xterm-viewport::-webkit-scrollbar,
+.settings-drawer::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.xterm-viewport::-webkit-scrollbar-track,
+.settings-drawer::-webkit-scrollbar-track {
+  background: transparent;
+}
+.xterm-viewport::-webkit-scrollbar-thumb,
+.settings-drawer::-webkit-scrollbar-thumb {
+  background-color: var(--ditty-chrome-border);
+  border-radius: 9999px;
+  border: 2px solid var(--ditty-terminal-bg, transparent);
+  background-clip: padding-box;
+}
+.settings-drawer::-webkit-scrollbar-thumb {
+  border-color: var(--ditty-chrome-bg);
+}
+.xterm-viewport::-webkit-scrollbar-thumb:hover,
+.settings-drawer::-webkit-scrollbar-thumb:hover {
+  background-color: var(--ditty-chrome-accent);
+}
+
+/* Settings drawer: slides in from the right over the terminal, never
+ * reflowing it (SPEC.md §10.2). */
+.settings-drawer {
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-drawer {
+    transition: none;
+  }
+}
+
 /* State dot: pulses once on connect, then stays still (SPEC.md §10.1). */
 @keyframes dot-pulse {
   0% {

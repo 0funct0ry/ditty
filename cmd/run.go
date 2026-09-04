@@ -46,7 +46,7 @@ func init() {
 // no persistent flags), so `ditty run -w bash` and the bare `ditty -w bash`
 // shortcut (§8.2) parse an identical flag surface without either command
 // inheriting the other's flags implicitly. Short letters claimed here:
-// p a b o v q f L (see SPEC.md §8.1).
+// p a b o v q f L t F s c k R C e l (see SPEC.md §8.1).
 func registerRunFlags(fs *pflag.FlagSet) {
 	fs.IntP("port", "p", 7654, "port to listen on (0 = random, printed at startup)")
 	fs.StringP("address", "a", "127.0.0.1", "address to bind")
@@ -56,7 +56,24 @@ func registerRunFlags(fs *pflag.FlagSet) {
 	fs.BoolP("quiet", "q", false, "suppress all but warning/error logs")
 	fs.StringP("log-format", "f", "text", "log output format: text or json")
 	fs.StringP("log-file", "L", "", "write logs to this file instead of stderr")
+	registerProfileFlags(fs)
 	registerFixtureFlags(fs)
+}
+
+// registerProfileFlags defines the SPEC.md §7 Profile-seeding flags (M6).
+// Nothing consumes these yet outside a "fixture" build — internal/session
+// (M9) is what will seed the real Hub's Hello.Profile from them.
+func registerProfileFlags(fs *pflag.FlagSet) {
+	fs.StringP("profile-theme", "t", "ditty-dark",
+		"terminal theme: ditty-dark, ditty-light, nord, dracula, solarized-dark, monokai")
+	fs.StringP("profile-font-family", "F", "JetBrains Mono, SF Mono, Menlo, monospace", "terminal font family")
+	fs.IntP("profile-font-size", "s", 14, "terminal font size in pixels")
+	fs.StringP("profile-cursor-style", "c", "block", "cursor style: block, underline, bar")
+	fs.BoolP("profile-cursor-blink", "k", true, "whether the cursor blinks")
+	fs.StringP("profile-renderer", "R", "webgl", "terminal renderer: webgl, canvas")
+	fs.BoolP("profile-copy-on-select", "C", true, "copy selected text to the clipboard automatically")
+	fs.StringP("profile-bell", "e", "none", "bell style: none, sound, visual")
+	fs.BoolP("profile-lock", "l", false, "force these Profile values and hide the settings drawer entirely")
 }
 
 func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {

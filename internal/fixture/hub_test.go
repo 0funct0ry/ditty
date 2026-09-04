@@ -2,6 +2,7 @@ package fixture
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -101,6 +102,31 @@ func TestHubDeploy_HelloThenOutput(t *testing.T) {
 	}
 	if got.String() != want.String() {
 		t.Fatalf("output mismatch:\ngot:  %q\nwant: %q", got.String(), want.String())
+	}
+}
+
+func TestHubSetProfile_SeedsHelloProfileAndLock(t *testing.T) {
+	scenario := Scenarios()["deploy"]
+	h := NewHubScaled(scenario, testScale)
+	h.SetProfile(json.RawMessage(`{"theme":"nord"}`), true)
+
+	c := newFakeClient("c1")
+	if err := h.Attach(c); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+
+	waitUntil(t, 2*time.Second, func() bool { return len(c.snapshot()) >= 1 })
+
+	frames := decodeAll(t, c.snapshot())
+	hello, err := wire.DecodeHello(frames[0].Payload)
+	if err != nil {
+		t.Fatalf("decode Hello: %v", err)
+	}
+	if string(hello.Profile) != `{"theme":"nord"}` {
+		t.Fatalf("Hello.Profile = %s, want {\"theme\":\"nord\"}", hello.Profile)
+	}
+	if !hello.Policy.ProfileLock {
+		t.Fatal("Hello.Policy.ProfileLock = false, want true")
 	}
 }
 

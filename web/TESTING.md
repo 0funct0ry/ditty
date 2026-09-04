@@ -1,4 +1,4 @@
-# Manual testing matrix — M4 terminal core, M5 chrome & states
+# Manual testing matrix — M4 terminal core, M5 chrome & states, M6 settings & themes
 
 Run against the real fixture Hub from M3, never against manually-toggled
 mock state — that's the whole point of Phase 2 rehearsing against a real
@@ -66,3 +66,27 @@ protocol, sizing attribution, elapsed timer, the access badge).
 | 380px layout | Narrow the window to 380px — chrome collapses to icon-only (title and Client count hide), the terminal keeps full height, nothing overflows horizontally. |
 | Lighthouse a11y | Run a Lighthouse audit against the `live` state; target ≥ 95. |
 | Screenshots | Capture each state (`connecting`, `live`, `reconnecting`, `closed`, `rejected`) at 1440px and 380px into `docs/public/screens/` — these double as docs/marketing assets later (SPEC.md §12 M5). |
+
+## M6 — settings drawer & themes
+
+Same setup as above (`make dev-fixture NAME=deploy` is enough for most of
+this; a few rows need extra fixture flags as noted).
+
+| Check | How |
+|-------|-----|
+| Theme swatches | Open the drawer (gear icon), click each of the six swatches. Confirm the terminal background/foreground/ANSI colors and the chrome bar's tint change together, instantly, with no reload and no `Resize` frame sent (fixture has no PTY to resize — check the Network tab shows nothing new). |
+| Font family / size | Change the font `<select>` and the size stepper — confirm the terminal re-renders live at the new font/size. |
+| Cursor style / blink | Change cursor style and toggle blink — confirm the terminal cursor updates live. |
+| Renderer | Switch WebGL ⇄ Canvas — confirm no visible resize/reflow of the terminal; if WebGL is unavailable in your browser, confirm the "renderer: canvas (WebGL unavailable)" badge still shows and the renderer select doesn't fight it. |
+| Copy on select | Toggle on, select text in the terminal, confirm it's copied to the clipboard; toggle off, confirm selecting no longer copies. |
+| Bell | `make dev-fixture NAME=deploy ARGS="--profile-bell visual"` (or toggle "Bell notification" in the drawer) then trigger a BEL byte from the scenario/PTY — confirm a brief flash; with the toggle off, confirm nothing happens. |
+| Persistence | Change several settings, reload the page — confirm they survive via `localStorage['ditty.profile.v1']`. |
+| Reset to server defaults | After changing settings, click "Reset to server defaults" — confirm the Profile returns exactly to what `Hello.profile` seeded, and `localStorage` is cleared. |
+| `--profile-lock` | `make dev-fixture NAME=deploy ARGS="--profile-lock --profile-theme monokai"` — confirm the settings gear button is entirely **absent** from the chrome bar (not just disabled), and the seeded theme/flags apply regardless of any stale `localStorage` override from a previous session. |
+| No reflow | With the drawer open, confirm the terminal's bounding box (and its `cols`×`rows` in the status bar) does not change — the drawer overlays, it never resizes the PTY viewport. |
+| Share sheet | Click the share icon — confirm it shows the current URL, a working Copy button, and one honest sentence about access (`They cannot type` for a read-only fixture session). |
+| Keyboard-only | Tab into the drawer/share sheet; every control (swatches, selects, stepper, switches, reset, close) must be reachable with a visible focus ring; `Escape` closes either. |
+| `prefers-reduced-motion` | Emulate `reduce` — the drawer's slide-in must not animate (see `index.css`'s `.settings-drawer` reduced-motion override). |
+| 380px layout | Narrow the window to 380px — the drawer becomes full-width, still overlays rather than reflowing the terminal. |
+| Screenshots | Capture the drawer open and the share sheet open at 1440px and 380px into `docs/public/screens/`. |
+| Bundle budget | `make web-build` — must stay under 400 KB gzipped; the six themes and the drawer are pure data/markup, so this shouldn't move much (SPEC.md §10.4). |

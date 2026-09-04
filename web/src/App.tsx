@@ -3,10 +3,13 @@ import { ChromeBar } from "./components/ChromeBar";
 import { StatusBar } from "./components/StatusBar";
 import { Terminal } from "./components/Terminal";
 import { ReadOnlyToast } from "./components/ReadOnlyToast";
+import { SettingsDrawer } from "./components/SettingsDrawer";
+import { ShareSheet } from "./components/ShareSheet";
 import { ClosedOverlay, ConnectingOverlay, ReconnectOverlay, RejectedOverlay } from "./components/Overlays";
 import { useDittyConnection } from "./hooks/useDittyConnection";
 import { useRosterNote } from "./hooks/useRosterNote";
-import { defaultProfile } from "./protocol/defaultProfile";
+import { useProfile } from "./hooks/useProfile";
+import { resolveChromeTint, resolveTheme } from "./protocol/themes";
 
 function wsURL(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -31,7 +34,8 @@ const STATE_ANNOUNCEMENT: Record<string, string> = {
 export default function App() {
   const writeRef = useRef<((data: Uint8Array) => void) | null>(null);
   const [readOnlyToast, setReadOnlyToast] = useState(false);
-  const [shareCopied, setShareCopied] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const { state, hello, roster, exit, writable, sizing, rejectReason, send, resize, retryNow } = useDittyConnection(
     wsURL(),
@@ -39,18 +43,15 @@ export default function App() {
   );
 
   const rosterNote = useRosterNote(roster);
+  const { profile, setProfile, resetToServerDefaults, locked } = useProfile(hello);
+  const chromeTint = resolveChromeTint(profile);
+  const terminalTheme = resolveTheme(profile);
 
   useEffect(() => {
     if (!readOnlyToast) return;
     const timer = setTimeout(() => setReadOnlyToast(false), 2500);
     return () => clearTimeout(timer);
   }, [readOnlyToast]);
-
-  useEffect(() => {
-    if (!shareCopied) return;
-    const timer = setTimeout(() => setShareCopied(false), 2500);
-    return () => clearTimeout(timer);
-  }, [shareCopied]);
 
   useEffect(() => {
     if (!hello?.policy.unloadWarning) return;
@@ -67,13 +68,22 @@ export default function App() {
     document.title = hello?.session.title || hello?.session.name || "ditty";
   }, [hello?.session.title, hello?.session.name]);
 
-  const profile = hello?.profile ?? defaultProfile;
   const sessionName = hello?.session.name ?? "session";
   const sessionTitle = hello?.session.title ?? sessionName;
   const clientCount = roster?.count ?? (hello ? 1 : 0);
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className="flex h-full flex-col"
+      style={
+        {
+          "--ditty-chrome-bg": chromeTint.bg,
+          "--ditty-chrome-border": chromeTint.border,
+          "--ditty-chrome-accent": chromeTint.accent,
+          "--ditty-terminal-bg": terminalTheme.background,
+        } as React.CSSProperties
+      }
+    >
       <div aria-live="polite" className="sr-only">
         {STATE_ANNOUNCEMENT[state] ?? ""}
       </div>
@@ -83,15 +93,11 @@ export default function App() {
         connectionState={state}
         writable={writable}
         clientCount={clientCount}
-        onSettingsClick={() => {
-          /* Settings drawer contents arrive in M6; the button is reachable
-           * and keyboard-focusable now so the chrome layout doesn't shift. */
-        }}
-        onShareClick={() => {
-          void navigator.clipboard.writeText(window.location.href).then(() => setShareCopied(true));
-        }}
+        settingsHidden={locked}
+        onSettingsClick={() => setSettingsOpen((v) => !v)}
+        onShareClick={() => setShareOpen((v) => !v)}
       />
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
         <Terminal
           profile={profile}
           writable={writable}
@@ -102,11 +108,16 @@ export default function App() {
           onReadOnlyKeystroke={() => setReadOnlyToast(true)}
         />
         {readOnlyToast && <ReadOnlyToast />}
-        {shareCopied && (
-          <div className="absolute right-3 top-3 rounded-md border border-line bg-ink-soft px-3 py-2 font-sans text-sm text-[#E4E7EC]">
-            Link copied
-          </div>
+        {!locked && (
+          <SettingsDrawer
+            open={settingsOpen}
+            profile={profile}
+            onChange={setProfile}
+            onReset={resetToServerDefaults}
+            onClose={() => setSettingsOpen(false)}
+          />
         )}
+        <ShareSheet open={shareOpen} sessionName={sessionName} writable={writable} onClose={() => setShareOpen(false)} />
         {state === "connecting" && <ConnectingOverlay sessionName={sessionName} />}
         {state === "reconnecting" && (
           <ReconnectOverlay

@@ -41,6 +41,7 @@ export interface HelloPolicy {
   reconnectInterval: string;
   unloadWarning: boolean;
   maxClients: number;
+  profileLock: boolean;
 }
 
 /** Server -> Client payload for ServerOpcode.Roster. */

@@ -68,6 +68,7 @@ type HelloPolicy struct {
 	ReconnectInterval string `json:"reconnectInterval"`
 	UnloadWarning     bool   `json:"unloadWarning"`
 	MaxClients        int    `json:"maxClients"`
+	ProfileLock       bool   `json:"profileLock"`
 }
 
 // Roster is the Server -> Client payload for OpRoster.

@@ -13,6 +13,7 @@ import (
 	"github.com/0funct0ry/ditty/internal/config"
 	"github.com/0funct0ry/ditty/internal/fixture"
 	"github.com/0funct0ry/ditty/internal/httpapi"
+	"github.com/0funct0ry/ditty/internal/profile"
 )
 
 // registerFixtureFlags adds the dev-only --fixture flag. It is gated by the
@@ -37,6 +38,24 @@ func fixtureWSHandler(resolver *config.Resolver) (http.Handler, error) {
 	}
 	hub := fixture.NewHub(scenario)
 	hub.SetMaxClients(resolver.Int("max-clients"))
+
+	p := profile.Default()
+	if theme := resolver.String("profile-theme"); profile.ValidTheme(theme) {
+		p.Theme = theme
+	}
+	p.FontFamily = resolver.String("profile-font-family")
+	p.FontSize = resolver.Int("profile-font-size")
+	p.CursorStyle = resolver.String("profile-cursor-style")
+	p.CursorBlink = resolver.Bool("profile-cursor-blink")
+	p.Renderer = resolver.String("profile-renderer")
+	p.CopyOnSelect = resolver.Bool("profile-copy-on-select")
+	p.BellStyle = resolver.String("profile-bell")
+	raw, err := p.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("marshal fixture profile: %w", err)
+	}
+	hub.SetProfile(raw, resolver.Bool("profile-lock"))
+
 	return httpapi.NewWSHandler(fixtureHubAdapter{hub: hub}), nil
 }
 

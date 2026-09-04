@@ -6,6 +6,9 @@ export interface ChromeBarProps {
   connectionState: ConnectionState;
   writable: boolean;
   clientCount: number;
+  /** Hides the settings button entirely under --profile-lock (SPEC.md
+   * §10.2) — the control must be absent, not just disabled. */
+  settingsHidden: boolean;
   onSettingsClick: () => void;
   onShareClick: () => void;
 }
@@ -13,7 +16,7 @@ export interface ChromeBarProps {
 const DOT_CLASS: Record<ConnectionState, string> = {
   connecting: "bg-saffron",
   open: "bg-saffron",
-  live: "bg-pine animate-dot-pulse",
+  live: "bg-[var(--ditty-chrome-accent)] animate-dot-pulse",
   reconnecting: "bg-saffron",
   closed: "bg-muted",
   rejected: "bg-rust",
@@ -28,11 +31,12 @@ export function ChromeBar({
   connectionState,
   writable,
   clientCount,
+  settingsHidden,
   onSettingsClick,
   onShareClick,
 }: ChromeBarProps) {
   return (
-    <div className="flex h-chrome shrink-0 items-center gap-3 border-b border-line bg-ink px-3 font-sans text-sm text-[#E4E7EC]">
+    <div className="flex h-chrome shrink-0 items-center gap-3 border-b border-[var(--ditty-chrome-border)] bg-[var(--ditty-chrome-bg)] px-3 font-sans text-sm text-[#E4E7EC]">
       <span
         aria-hidden="true"
         className={`h-2 w-2 shrink-0 rounded-full ${DOT_CLASS[connectionState]}`}
@@ -50,14 +54,16 @@ export function ChromeBar({
       <span className="hidden shrink-0 font-mono text-xs text-muted-bright sm:inline">
         {clientCount} watching
       </span>
-      <button
-        type="button"
-        aria-label="Settings"
-        onClick={onSettingsClick}
-        className="shrink-0 rounded p-1.5 text-muted-bright hover:text-[#E4E7EC] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine"
-      >
-        <GearIcon />
-      </button>
+      {!settingsHidden && (
+        <button
+          type="button"
+          aria-label="Settings"
+          onClick={onSettingsClick}
+          className="shrink-0 rounded p-1.5 text-muted-bright hover:text-[#E4E7EC] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine"
+        >
+          <GearIcon />
+        </button>
+      )}
       <button
         type="button"
         aria-label="Share"

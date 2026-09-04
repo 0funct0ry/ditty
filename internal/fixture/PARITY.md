@@ -38,3 +38,7 @@ not a suggestion.
       on its `Detach`, the role passes to the next Client by join order and
       a `State` frame announces it. Exercised by attaching two+ Clients to
       any scenario and detaching the first.
+- [ ] **Profile seeding and lock.** `Hello.profile` carries the seeded
+      Profile (SPEC.md §7) and `Hello.policy.profileLock` reflects
+      `--profile-lock`, exactly as set via `Hub.SetProfile`. Exercised by
+      `TestHubSetProfile_SeedsHelloProfileAndLock`.

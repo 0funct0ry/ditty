@@ -57,7 +57,14 @@ const helloPayload: Hello = {
   server: "ditty/dev",
   session: { id: "s1", name: "deploy", title: "deploy", cols: 80, rows: 24, state: "live", startedAt: "now" },
   client: { id: "c1", label: "you", writable: true, sizing: true },
-  policy: { writable: true, reconnect: true, reconnectInterval: "1s", unloadWarning: false, maxClients: 8 },
+  policy: {
+    writable: true,
+    reconnect: true,
+    reconnectInterval: "1s",
+    unloadWarning: false,
+    maxClients: 8,
+    profileLock: false,
+  },
 };
 
 function setup() {

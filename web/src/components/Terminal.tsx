@@ -6,6 +6,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
 import type { Profile } from "../protocol/types";
+import { resolveTheme } from "../protocol/themes";
 
 // Keys xterm.js must never capture, so the browser/OS keeps its own
 // behaviour for them (SPEC.md §7.1).
@@ -19,6 +20,10 @@ function isNeverCaptured(ev: KeyboardEvent): boolean {
   return false;
 }
 
+// xterm.js has no first-class altSendsEscape option — Alt-prefixed input
+// already reaches the PTY as ESC-prefixed bytes by default, which is what
+// that Profile field describes, so there is nothing to toggle on the
+// xterm.Terminal itself.
 function applyProfile(term: XTerm, profile: Profile) {
   term.options.fontFamily = profile.fontFamily;
   term.options.fontSize = profile.fontSize;
@@ -28,8 +33,9 @@ function applyProfile(term: XTerm, profile: Profile) {
   term.options.scrollback = profile.scrollback;
   term.options.rightClickSelectsWord = profile.rightClickPaste;
   term.options.macOptionIsMeta = profile.macOptionIsMeta;
-  if (Object.keys(profile.colors).length > 0) {
-    term.options.theme = profile.colors;
+  term.options.theme = resolveTheme(profile);
+  if (profile.unicodeVersion === "11") {
+    term.unicode.activeVersion = "11";
   }
 }
 
@@ -48,7 +54,9 @@ export function Terminal({ profile, writable, sizing, writeRef, onInput, onResiz
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const webglAddonRef = useRef<WebglAddon | null>(null);
   const [rendererFallback, setRendererFallback] = useState(false);
+  const [bellFlash, setBellFlash] = useState(false);
 
   // writable/sizing/onInput/onResize/onReadOnlyKeystroke are read through
   // refs inside the mount effect below so the terminal is created exactly
@@ -63,6 +71,10 @@ export function Terminal({ profile, writable, sizing, writeRef, onInput, onResiz
   onResizeRef.current = onResize;
   const onReadOnlyKeystrokeRef = useRef(onReadOnlyKeystroke);
   onReadOnlyKeystrokeRef.current = onReadOnlyKeystroke;
+  const bellStyleRef = useRef<Profile["bellStyle"]>(profile?.bellStyle ?? "none");
+  bellStyleRef.current = profile?.bellStyle ?? "none";
+  const copyOnSelectRef = useRef(profile?.copyOnSelect ?? true);
+  copyOnSelectRef.current = profile?.copyOnSelect ?? true;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -81,7 +93,9 @@ export function Terminal({ profile, writable, sizing, writeRef, onInput, onResiz
     term.unicode.activeVersion = "11";
 
     try {
-      term.loadAddon(new WebglAddon());
+      const webgl = new WebglAddon();
+      term.loadAddon(webgl);
+      webglAddonRef.current = webgl;
     } catch {
       setRendererFallback(true);
     }
@@ -102,6 +116,23 @@ export function Terminal({ profile, writable, sizing, writeRef, onInput, onResiz
       onInputRef.current(new TextEncoder().encode(data));
     });
 
+    term.onSelectionChange(() => {
+      if (!copyOnSelectRef.current) return;
+      const selection = term.getSelection();
+      if (selection) void navigator.clipboard.writeText(selection).catch(() => {});
+    });
+
+    term.onBell(() => {
+      if (bellStyleRef.current === "visual") {
+        setBellFlash(true);
+        setTimeout(() => setBellFlash(false), 150);
+      }
+      // "sound" relies on the BEL byte itself, which xterm.js does not play
+      // audibly by default; a real bell sound is out of scope for M6's
+      // fixture-only rehearsal and is left for a later milestone to wire an
+      // <audio> element behind this same branch if it's still wanted.
+    });
+
     termRef.current = term;
     fitRef.current = fit;
     writeRef.current = (data) => term.write(data);
@@ -120,6 +151,7 @@ export function Terminal({ profile, writable, sizing, writeRef, onInput, onResiz
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      webglAddonRef.current = null;
     };
     // Mount once; the container ref itself never changes for this component's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -131,9 +163,35 @@ export function Terminal({ profile, writable, sizing, writeRef, onInput, onResiz
     }
   }, [profile]);
 
+  // Renderer switch: swap the WebGL addon in/out without touching layout —
+  // this must never trigger a fit()/Resize, since a settings change should
+  // not resize the PTY (SPEC.md §10.2 acceptance).
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term || !profile) return;
+    const wantWebgl = profile.renderer === "webgl";
+    const hasWebgl = webglAddonRef.current !== null;
+    if (wantWebgl === hasWebgl) return;
+
+    if (wantWebgl) {
+      try {
+        const webgl = new WebglAddon();
+        term.loadAddon(webgl);
+        webglAddonRef.current = webgl;
+        setRendererFallback(false);
+      } catch {
+        setRendererFallback(true);
+      }
+    } else {
+      webglAddonRef.current?.dispose();
+      webglAddonRef.current = null;
+    }
+  }, [profile?.renderer]);
+
   return (
     <div className="relative h-full w-full bg-ink-deep">
       <div ref={containerRef} className="h-full w-full" />
+      {bellFlash && <div className="pointer-events-none absolute inset-0 bg-white/10" />}
       {rendererFallback && (
         <div className="pointer-events-none absolute bottom-2 right-2 rounded bg-ink-soft px-2 py-1 font-mono text-xs text-muted-bright">
           renderer: canvas (WebGL unavailable)

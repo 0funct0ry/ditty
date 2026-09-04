@@ -1,6 +1,7 @@
 package fixture
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -11,18 +12,20 @@ import (
 // Hub's join replay, roster, sizing and exit behaviour (SPEC.md §3-§5)
 // against scripted data instead of a live PTY.
 type Hub struct {
-	mu         sync.Mutex
-	scenario   Scenario
-	scale      float64
-	ring       *ring
-	clients    map[string]*attachedClient
-	order      []string // join order, for sizing handover
-	sizingID   string
-	state      string
-	startedAt  time.Time
-	closed     bool
-	exit       *wire.Exit
-	maxClients int
+	mu          sync.Mutex
+	scenario    Scenario
+	scale       float64
+	ring        *ring
+	clients     map[string]*attachedClient
+	order       []string // join order, for sizing handover
+	sizingID    string
+	state       string
+	startedAt   time.Time
+	closed      bool
+	exit        *wire.Exit
+	maxClients  int
+	profile     json.RawMessage
+	profileLock bool
 
 	done chan struct{}
 }
@@ -82,6 +85,16 @@ func (h *Hub) SetMaxClients(n int) {
 	h.maxClients = n
 }
 
+// SetProfile seeds every future Hello's Profile with p and its Policy's
+// ProfileLock with locked (SPEC.md §7, §10.2). A nil p leaves Hello.Profile
+// unset, matching the pre-M6 behaviour.
+func (h *Hub) SetProfile(p json.RawMessage, locked bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.profile = p
+	h.profileLock = locked
+}
+
 // Attach admits c: it sends Hello, then a ring replay if there is one, then
 // (if the scenario has already ended) the terminal Exit frame, then
 // broadcasts the updated Roster. It matches the real Hub's replay-on-join
@@ -120,7 +133,13 @@ func (h *Hub) Attach(c Client) error {
 			StartedAt: h.startedAt.Format(time.RFC3339),
 		},
 		Client: wire.HelloClient{ID: c.ID(), Label: c.Label(), Writable: false, Sizing: sizing},
-		Policy: wire.HelloPolicy{Writable: false, Reconnect: true, ReconnectInterval: "1s"},
+		Policy: wire.HelloPolicy{
+			Writable:          false,
+			Reconnect:         true,
+			ReconnectInterval: "1s",
+			ProfileLock:       h.profileLock,
+		},
+		Profile: h.profile,
 	}
 	if err := h.sendJSON(c, wire.OpHello, hello); err != nil {
 		return err
