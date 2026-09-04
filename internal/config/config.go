@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -100,6 +101,13 @@ func (r *Resolver) Int(key string) int { return r.v.GetInt(key) }
 
 // Bool returns the resolved bool value for key.
 func (r *Resolver) Bool(key string) bool { return r.v.GetBool(key) }
+
+// StringSlice returns the resolved string-slice value for key, for
+// repeatable flags such as --env.
+func (r *Resolver) StringSlice(key string) []string { return r.v.GetStringSlice(key) }
+
+// Duration returns the resolved duration value for key.
+func (r *Resolver) Duration(key string) time.Duration { return r.v.GetDuration(key) }
 
 // Origin reports which layer supplied key's effective value.
 func (r *Resolver) Origin(key string) Origin {

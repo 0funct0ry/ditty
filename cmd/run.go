@@ -22,11 +22,12 @@ import (
 	"github.com/0funct0ry/ditty/internal/logging"
 )
 
-// runCmd starts a Session and serves it over the web. There is no real PTY
-// yet (SPEC.md §12 M8); it stands up the HTTP shell — /healthz and the
-// embedded UI — plus, in a dev build with the "fixture" build tag, a /ws
-// endpoint backed by a scripted internal/fixture Hub (M3). Command argv
-// after `--` is accepted but not yet run.
+// runCmd starts a Session and serves it over the web. internal/pty (M8) can
+// spawn a Command, but nothing wires it into a running Session yet — that
+// is internal/session's job (M9). Until then this stands up the HTTP shell
+// — /healthz and the embedded UI — plus, in a dev build with the "fixture"
+// build tag, a /ws endpoint backed by a scripted internal/fixture Hub (M3).
+// Command argv after `--` is accepted but not yet run.
 var runCmd = &cobra.Command{
 	Use:   "run [flags] -- <command> [args...]",
 	Short: "Start a Session and share it over the web",
@@ -46,7 +47,9 @@ func init() {
 // no persistent flags), so `ditty run -w bash` and the bare `ditty -w bash`
 // shortcut (§8.2) parse an identical flag surface without either command
 // inheriting the other's flags implicitly. Short letters claimed here:
-// p a b o v q f L t F s c k R C e l (see SPEC.md §8.1).
+// p a b o v q f L t F s c k R C e l d E T U G N i y z Z x W g X K (see
+// SPEC.md §8.1). Note shorthands are case-sensitive single runes, so e.g.
+// "t" (profile-theme) and "T" (term) are distinct and do not collide.
 func registerRunFlags(fs *pflag.FlagSet) {
 	fs.IntP("port", "p", 7654, "port to listen on (0 = random, printed at startup)")
 	fs.StringP("address", "a", "127.0.0.1", "address to bind")
@@ -58,6 +61,7 @@ func registerRunFlags(fs *pflag.FlagSet) {
 	fs.StringP("log-file", "L", "", "write logs to this file instead of stderr")
 	registerProfileFlags(fs)
 	registerFixtureFlags(fs)
+	registerCommandFlags(fs)
 }
 
 // registerProfileFlags defines the SPEC.md §7 Profile-seeding flags (M6).
@@ -97,7 +101,7 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 	defer func() { _ = closer.Close() }()
 
 	if len(args) > 0 {
-		logger.Debug("Command argv accepted but not yet spawned — PTY spawning arrives in M8", "argv", args)
+		logger.Debug("Command argv accepted but not yet run — Session/Hub wiring arrives in M9", "argv", args)
 	}
 
 	wsHandler, err := fixtureWSHandler(resolver)
