@@ -39,6 +39,8 @@ bin/
 .cover/
 bin/tools/
 dist/
+node_modules/
+*.tsbuildinfo
 go.mod.bak
 go.sum.bak
 .agent/
