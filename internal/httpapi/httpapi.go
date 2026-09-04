@@ -1,8 +1,9 @@
-// Package httpapi is the M1 app shell: it answers /healthz and serves the
-// embedded UI under --base-path. There is no Session, no Grant, no PTY and
-// no WebSocket here yet — those arrive with the fixture Hub (M3) and the
-// real transport (M10). Gin is not used until M10 either; net/http alone
-// covers this milestone's scope (SPEC.md §12 M1).
+// Package httpapi is the app shell: it answers /healthz, serves the
+// embedded UI under --base-path, and (since M3) can mount a minimal /ws
+// upgrade handler in front of a Hub such as internal/fixture. The full
+// route table from SPEC.md §4 — security headers, CSP, /t/:token, /api/*
+// — and the switch to Gin both arrive in M10; this is deliberately just
+// enough transport for a browser to reach a Hub (SPEC.md §12 M1, M3).
 package httpapi
 
 import (
@@ -14,9 +15,12 @@ import (
 	"github.com/0funct0ry/ditty/web"
 )
 
-// NewHandler builds the M1 shell handler: healthzHandler at
-// "<basePath>healthz" and the embedded UI at basePath.
-func NewHandler(basePath string) (http.Handler, error) {
+// NewHandler builds the app shell handler: healthzHandler at
+// "<basePath>healthz", the embedded UI at basePath, and — when ws is
+// non-nil — a WebSocket upgrade endpoint at "<basePath>ws". ws is nil on
+// every path except the dev-only --fixture build (M3); the full-featured
+// route table replaces this ws plumbing in M10.
+func NewHandler(basePath string, ws http.Handler) (http.Handler, error) {
 	sub, err := fs.Sub(web.DistFS, "dist")
 	if err != nil {
 		return nil, err
@@ -26,6 +30,9 @@ func NewHandler(basePath string) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(basePath+"healthz", healthzHandler)
+	if ws != nil {
+		mux.Handle(basePath+"ws", ws)
+	}
 
 	fileServer := http.FileServer(http.FS(sub))
 	uiHandler := fileServer

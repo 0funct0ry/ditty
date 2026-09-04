@@ -22,9 +22,11 @@ import (
 	"github.com/0funct0ry/ditty/internal/logging"
 )
 
-// runCmd starts a Session and serves it over the web. In M1 there is no
-// PTY yet (SPEC.md §12), so it only stands up the HTTP shell: /healthz and
-// the embedded UI. Command argv after `--` is accepted but not yet run.
+// runCmd starts a Session and serves it over the web. There is no real PTY
+// yet (SPEC.md §12 M8); it stands up the HTTP shell — /healthz and the
+// embedded UI — plus, in a dev build with the "fixture" build tag, a /ws
+// endpoint backed by a scripted internal/fixture Hub (M3). Command argv
+// after `--` is accepted but not yet run.
 var runCmd = &cobra.Command{
 	Use:   "run [flags] -- <command> [args...]",
 	Short: "Start a Session and share it over the web",
@@ -54,6 +56,7 @@ func registerRunFlags(fs *pflag.FlagSet) {
 	fs.BoolP("quiet", "q", false, "suppress all but warning/error logs")
 	fs.StringP("log-format", "f", "text", "log output format: text or json")
 	fs.StringP("log-file", "L", "", "write logs to this file instead of stderr")
+	registerFixtureFlags(fs)
 }
 
 func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
@@ -80,8 +83,13 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 		logger.Debug("Command argv accepted but not yet spawned — PTY spawning arrives in M8", "argv", args)
 	}
 
+	wsHandler, err := fixtureWSHandler(resolver)
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+
 	basePath := resolver.String("base-path")
-	handler, err := httpapi.NewHandler(basePath)
+	handler, err := httpapi.NewHandler(basePath, wsHandler)
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}

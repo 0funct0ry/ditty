@@ -135,6 +135,10 @@ install: $(WEB_DIST) ## go install the binary into GOBIN
 run: $(WEB_DIST) ## Run from source — make run ARGS="-w bash"
 	$(GO) run -ldflags '$(LDFLAGS)' $(MAIN) $(ARGS)
 
+.PHONY: dev-fixture
+dev-fixture: $(WEB_DIST) ## Run from source against a fixture scenario — make dev-fixture NAME=deploy
+	$(GO) run -tags fixture -ldflags '$(LDFLAGS)' $(MAIN) --fixture $(or $(NAME),deploy) $(ARGS)
+
 .PHONY: generate
 generate: ## Run go generate
 	$(GO) generate ./...
