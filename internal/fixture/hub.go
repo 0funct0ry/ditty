@@ -11,20 +11,33 @@ import (
 // Hub's join replay, roster, sizing and exit behaviour (SPEC.md §3-§5)
 // against scripted data instead of a live PTY.
 type Hub struct {
-	mu        sync.Mutex
-	scenario  Scenario
-	scale     float64
-	ring      *ring
-	clients   map[string]*attachedClient
-	order     []string // join order, for sizing handover
-	sizingID  string
-	state     string
-	startedAt time.Time
-	closed    bool
-	exit      *wire.Exit
+	mu         sync.Mutex
+	scenario   Scenario
+	scale      float64
+	ring       *ring
+	clients    map[string]*attachedClient
+	order      []string // join order, for sizing handover
+	sizingID   string
+	state      string
+	startedAt  time.Time
+	closed     bool
+	exit       *wire.Exit
+	maxClients int
 
 	done chan struct{}
 }
+
+// ErrMaxClients is returned by Attach when the session is already at
+// --max-clients capacity. It implements CloseCode so a transport (see
+// internal/httpapi's structural check) can reject the Client with the
+// right WebSocket close code instead of a generic close.
+type ErrMaxClients struct{ Max int }
+
+func (e *ErrMaxClients) Error() string { return "too many clients" }
+
+// CloseCode reports the WebSocket close code and reason a transport should
+// use to reject the Client (1013, "try again later" — SPEC.md §5.5/§6).
+func (e *ErrMaxClients) CloseCode() (int, string) { return 1013, "too many clients" }
 
 type attachedClient struct {
 	client           Client
@@ -60,13 +73,29 @@ func newHub(scenario Scenario, scale float64) *Hub {
 	return h
 }
 
+// SetMaxClients caps the number of simultaneously attached Clients; 0 (the
+// default) means unlimited. Attach rejects any Client over the limit with
+// ErrMaxClients instead of admitting it.
+func (h *Hub) SetMaxClients(n int) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.maxClients = n
+}
+
 // Attach admits c: it sends Hello, then a ring replay if there is one, then
 // (if the scenario has already ended) the terminal Exit frame, then
 // broadcasts the updated Roster. It matches the real Hub's replay-on-join
 // behaviour for both a first join and a reconnect.
+//
+// If the session is already at --max-clients capacity, c is rejected
+// outright with ErrMaxClients — no Hello, no roster entry.
 func (h *Hub) Attach(c Client) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if h.maxClients > 0 && len(h.clients) >= h.maxClients {
+		return &ErrMaxClients{Max: h.maxClients}
+	}
 
 	joinedAt := time.Now()
 	h.clients[c.ID()] = &attachedClient{client: c, joinedAt: joinedAt}

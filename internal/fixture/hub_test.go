@@ -2,6 +2,7 @@ package fixture
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 	"time"
 
@@ -231,6 +232,36 @@ func TestHubSizingHandover(t *testing.T) {
 		}
 		return false
 	})
+}
+
+func TestHubMaxClients_RejectsOverLimit(t *testing.T) {
+	scenario := Scenarios()["deploy"]
+	h := NewHubScaled(scenario, testScale)
+	h.SetMaxClients(1)
+
+	c1 := newFakeClient("c1")
+	if err := h.Attach(c1); err != nil {
+		t.Fatalf("Attach c1: %v", err)
+	}
+
+	c2 := newFakeClient("c2")
+	err := h.Attach(c2)
+	if err == nil {
+		t.Fatalf("Attach c2: want ErrMaxClients, got nil")
+	}
+	var maxErr *ErrMaxClients
+	if !errors.As(err, &maxErr) {
+		t.Fatalf("Attach c2 error = %v, want *ErrMaxClients", err)
+	}
+	code, reason := maxErr.CloseCode()
+	if code != 1013 || reason == "" {
+		t.Fatalf("CloseCode() = (%d, %q), want (1013, non-empty)", code, reason)
+	}
+
+	// Rejected clients must not appear in the roster or take a sizing role.
+	if len(h.order) != 1 || h.order[0] != "c1" {
+		t.Fatalf("order = %v, want [c1]", h.order)
+	}
 }
 
 func TestHubReadOnly_DropsInputWithOneNotice(t *testing.T) {

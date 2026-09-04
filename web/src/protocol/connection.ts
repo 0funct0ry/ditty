@@ -63,6 +63,8 @@ export class DittyConnection {
   roster: Roster | null = null;
   sessionState: State | null = null;
   exit: Exit | null = null;
+  /** Close reason the server sent when it rejected this Client outright. */
+  rejectReason: string | null = null;
 
   private readonly opts: DittyConnectionOptions;
 
@@ -92,7 +94,7 @@ export class DittyConnection {
       this.setState("open");
     };
     socket.onmessage = (ev) => this.handleMessage(ev.data);
-    socket.onclose = (ev) => this.handleClose(ev.code);
+    socket.onclose = (ev) => this.handleClose(ev.code, ev.reason);
     socket.onerror = () => {
       /* the close handler that follows carries the actionable code */
     };
@@ -138,7 +140,7 @@ export class DittyConnection {
     }
   }
 
-  private handleClose(code: number) {
+  private handleClose(code: number, reason: string) {
     this.socket = null;
     if (this.destroyed) return;
 
@@ -147,6 +149,7 @@ export class DittyConnection {
       return;
     }
     if (!this.everLive && REJECT_CLOSE_CODES.has(code)) {
+      this.rejectReason = reason || null;
       this.setState("rejected");
       return;
     }
@@ -166,14 +169,17 @@ export class DittyConnection {
     this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, this.maxReconnectMs);
   }
 
-  /** Cancels any pending backoff and reconnects immediately. */
+  /** Cancels any pending backoff and reconnects immediately. Also usable
+   * from `rejected` (SPEC.md §10.1's "Try again") — that state has no
+   * scheduled retry to cancel, just a fresh attempt to make. */
   retryNow() {
-    if (this.state !== "reconnecting") return;
+    if (this.state !== "reconnecting" && this.state !== "rejected") return;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
     this.reconnectDelayMs = this.baseReconnectMs;
+    this.rejectReason = null;
     this.connect();
   }
 

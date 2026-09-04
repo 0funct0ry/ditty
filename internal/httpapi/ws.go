@@ -77,7 +77,11 @@ func NewWSHandler(hub Hub) http.Handler {
 		client := &wsClient{id: id, label: "Client " + id[:6], conn: conn}
 
 		if err := hub.Attach(client); err != nil {
-			_ = conn.Close()
+			code, reason := websocket.CloseTryAgainLater, "rejected"
+			if cc, ok := err.(interface{ CloseCode() (int, string) }); ok {
+				code, reason = cc.CloseCode()
+			}
+			closeConn(conn, code, reason)
 			return
 		}
 		defer hub.Detach(id)

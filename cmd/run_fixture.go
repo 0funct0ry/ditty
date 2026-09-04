@@ -21,6 +21,7 @@ import (
 // M3).
 func registerFixtureFlags(fs *pflag.FlagSet) {
 	fs.String("fixture", "", "dev only: serve a scripted fixture scenario instead of a real PTY ("+scenarioNames()+")")
+	fs.Int("max-clients", 0, "reject Clients past this many simultaneous attachments (0 = unlimited)")
 }
 
 // fixtureWSHandler builds the /ws handler for --fixture, or returns a nil
@@ -35,6 +36,7 @@ func fixtureWSHandler(resolver *config.Resolver) (http.Handler, error) {
 		return nil, fmt.Errorf("unknown fixture scenario %q (available: %s)", name, scenarioNames())
 	}
 	hub := fixture.NewHub(scenario)
+	hub.SetMaxClients(resolver.Int("max-clients"))
 	return httpapi.NewWSHandler(fixtureHubAdapter{hub: hub}), nil
 }
 

@@ -19,6 +19,7 @@ export interface UseDittyConnectionResult {
   exit: Exit | null;
   writable: boolean;
   sizing: boolean;
+  rejectReason: string | null;
   send: (data: Uint8Array) => void;
   resize: (cols: number, rows: number) => void;
   retryNow: () => void;
@@ -71,6 +72,7 @@ export function useDittyConnection(url: string, options: UseDittyConnectionOptio
     exit,
     writable: connRef.current?.writable ?? false,
     sizing: connRef.current?.sizing ?? false,
+    rejectReason: connRef.current?.rejectReason ?? null,
     send: (data) => connRef.current?.send(data),
     resize: (cols, rows) => connRef.current?.resize(cols, rows),
     retryNow: () => connRef.current?.retryNow(),
