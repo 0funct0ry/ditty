@@ -2,13 +2,20 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -20,14 +27,15 @@ import (
 	"github.com/0funct0ry/ditty/internal/config"
 	"github.com/0funct0ry/ditty/internal/httpapi"
 	"github.com/0funct0ry/ditty/internal/logging"
+	"github.com/0funct0ry/ditty/internal/profile"
+	"github.com/0funct0ry/ditty/internal/pty"
+	"github.com/0funct0ry/ditty/internal/session"
 )
 
-// runCmd starts a Session and serves it over the web. internal/pty (M8)
-// can spawn a Command and internal/session (M9) can drive a real Hub from
-// it, but wiring either into a live HTTP/WebSocket transport is internal/
-// httpapi's job (M10) — until then this stands up the HTTP shell only:
-// /healthz and the embedded UI. Command argv after `--` is accepted but
-// not yet run.
+// runCmd starts a Session and serves it over the web: it spawns the
+// Command after `--` inside a PTY (internal/pty, M8), drives it through a
+// real Hub (internal/session, M9), and serves that Hub over the real HTTP/
+// WebSocket transport (internal/httpapi, M10).
 var runCmd = &cobra.Command{
 	Use:   "run [flags] -- <command> [args...]",
 	Short: "Start a Session and share it over the web",
@@ -62,11 +70,11 @@ func registerRunFlags(fs *pflag.FlagSet) {
 	registerProfileFlags(fs)
 	registerSessionFlags(fs)
 	registerCommandFlags(fs)
+	registerTransportFlags(fs)
 }
 
-// registerProfileFlags defines the SPEC.md §7 Profile-seeding flags (M6).
-// Nothing consumes these yet outside a "fixture" build — internal/session
-// (M9) is what will seed the real Hub's Hello.Profile from them.
+// registerProfileFlags defines the SPEC.md §7 Profile-seeding flags (M6),
+// which execRun JSON-encodes into every new Hub's Hello.Profile.
 func registerProfileFlags(fs *pflag.FlagSet) {
 	fs.StringP("profile-theme", "t", "ditty-dark",
 		"terminal theme: ditty-dark, ditty-light, nord, dracula, solarized-dark, monokai")
@@ -100,14 +108,167 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 	}
 	defer func() { _ = closer.Close() }()
 
-	if len(args) > 0 {
-		logger.Debug("Command argv accepted but not yet run — Session/Hub wiring arrives in M9", "argv", args)
+	if len(args) == 0 {
+		return fmt.Errorf("run: no Command given; usage: %s", cmd.Use)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	profileJSON, err := buildProfile(resolver)
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+
+	sessionID, err := randomSessionID()
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+	name := resolver.String("name")
+	if name == "" {
+		name = sessionID
+	}
+	title := expandTitle(resolver.String("title"), args)
+	writable := resolver.Bool("writable")
+	shared := resolver.Bool("shared")
+	once := resolver.Bool("once")
+
+	// onceDone fires once --once's single Client's Command has ended,
+	// regardless of --shared, so ditty itself can exit the way gotty's
+	// --once does — not just close that one Session and keep the HTTP
+	// server running for nobody.
+	onceDone := make(chan struct{})
+	var onceDoneOnce sync.Once
+	signalOnceDone := func() { onceDoneOnce.Do(func() { close(onceDone) }) }
+
+	var server *http.Server
+	var shutdown func() error
+	var hubFactory httpapi.HubFactory
+	var info httpapi.SessionInfo
+
+	if shared {
+		// Today's pre-M10 model: one Command, one Hub, shared by every
+		// Client for the whole `ditty run` invocation (SPEC.md §1 — opt in
+		// with --shared for real terminal sharing/pairing).
+		command, err := buildCommand(resolver, args, sessionID)
+		if err != nil {
+			return fmt.Errorf("run: %w", err)
+		}
+		process, err := pty.Spawn(ctx, command)
+		if err != nil {
+			return fmt.Errorf("run: spawn Command: %w", err)
+		}
+		logger.Info("Command spawned", "argv", args, "session", sessionID, "shared", true)
+
+		hub := session.NewHub(session.Options{
+			Process:         process,
+			ID:              sessionID,
+			Name:            name,
+			Title:           title,
+			Cols:            resolver.Int("cols"),
+			Rows:            resolver.Int("rows"),
+			Server:          buildinfo.Version,
+			ScrollbackBytes: resolver.Int("scrollback-bytes"),
+			ChunkBytes:      resolver.Int("chunk-bytes"),
+			FlushInterval:   resolver.Duration("flush-interval"),
+			MaxClients:      resolver.Int("max-clients"),
+			Once:            once,
+			WaitForClient:   resolver.Duration("wait-for-client"),
+			DetachGrace:     detachGrace(resolver),
+			ExitOnDetach:    resolver.Bool("exit-on-detach"),
+			Profile:         profileJSON,
+			ProfileLock:     resolver.Bool("profile-lock"),
+		})
+		info = hub
+		hubFactory = func() (httpapi.Hub, error) { return httpapi.NewSessionHub(hub, writable), nil }
+		if once {
+			go func() { <-hub.Done(); signalOnceDone() }()
+		}
+		shutdown = func() error { return gracefulShutdown(server, process, hub) }
+	} else {
+		// ditty's default: every Client gets its own fresh Command, spawned
+		// on connect and torn down the moment that Client disconnects —
+		// one Client's Command exiting never touches any other Client, and
+		// a page refresh always starts a brand-new Command (no reconnect/
+		// replay across a fresh connection). --once still governs whether
+		// ditty accepts more than one Client, ever, across the whole run.
+		info = staticInfo("ready")
+		sessions := newActiveSessions()
+		var used atomic.Bool
+		hubFactory = func() (httpapi.Hub, error) {
+			if once && !used.CompareAndSwap(false, true) {
+				return nil, errors.New("ditty: --once already served its one Client")
+			}
+			connID, err := randomSessionID()
+			if err != nil {
+				return nil, err
+			}
+			command, err := buildCommand(resolver, args, connID)
+			if err != nil {
+				return nil, err
+			}
+			process, err := pty.Spawn(ctx, command)
+			if err != nil {
+				return nil, fmt.Errorf("spawn Command: %w", err)
+			}
+			logger.Info("Command spawned", "argv", args, "session", connID, "shared", false)
+
+			hub := session.NewHub(session.Options{
+				Process:         process,
+				ID:              connID,
+				Name:            name,
+				Title:           title,
+				Cols:            resolver.Int("cols"),
+				Rows:            resolver.Int("rows"),
+				Server:          buildinfo.Version,
+				ScrollbackBytes: resolver.Int("scrollback-bytes"),
+				ChunkBytes:      resolver.Int("chunk-bytes"),
+				FlushInterval:   resolver.Duration("flush-interval"),
+				// Always tear down once this Client leaves: per-Client mode
+				// has no reconnect-to-the-same-Command semantics.
+				Once:        true,
+				Profile:     profileJSON,
+				ProfileLock: resolver.Bool("profile-lock"),
+			})
+			sessions.add(connID, process)
+			go func() {
+				<-hub.Done()
+				sessions.remove(connID)
+				if once {
+					signalOnceDone()
+				}
+			}()
+			return httpapi.NewSessionHub(hub, writable), nil
+		}
+		shutdown = func() error {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err := server.Shutdown(shutdownCtx)
+			sessions.closeAll()
+			return err
+		}
+	}
+
+	originAllow, err := compileOriginAllow(resolver.String("origin-allow"))
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
 	}
 
 	basePath := resolver.String("base-path")
-	// ws stays nil until internal/httpapi's real transport (M10) drives an
-	// internal/session Hub; internal/session itself already exists (M9).
-	handler, err := httpapi.NewHandler(basePath, nil)
+	handler, err := httpapi.NewRouter(httpapi.Options{
+		BasePath:     basePath,
+		HubFactory:   hubFactory,
+		Info:         info,
+		PingInterval: resolver.Duration("ping-interval"),
+		OriginAllow:  originAllow,
+		AllowIframe:  resolver.String("allow-iframe"),
+		SessionID:    sessionID,
+		SessionName:  name,
+		SessionTitle: title,
+		Server:       buildinfo.Version,
+		Writable:     writable,
+		Profile:      profileJSON,
+	})
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
@@ -118,7 +279,14 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 		return fmt.Errorf("run: listen on %s: %w", addr, err)
 	}
 
-	url := fmt.Sprintf("http://%s%s", ln.Addr().String(), basePath)
+	normalizedBasePath := basePath
+	if normalizedBasePath == "" {
+		normalizedBasePath = "/"
+	}
+	if !strings.HasSuffix(normalizedBasePath, "/") {
+		normalizedBasePath += "/"
+	}
+	url := fmt.Sprintf("http://%s%s", ln.Addr().String(), normalizedBasePath)
 	logger.Info("ditty starting", "version", buildinfo.Version, "url", url)
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "ditty  %s\n  url  %s\n", buildinfo.Version, url)
 
@@ -128,16 +296,16 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 		}
 	}
 
-	server := &http.Server{Handler: handler}
+	server = &http.Server{Handler: handler}
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.Serve(ln) }()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	select {
 	case <-ctx.Done():
 		logger.Info("shutting down")
+		return shutdown()
+	case <-onceDone:
+		logger.Info("shutting down: --once served its one Client")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
@@ -147,4 +315,168 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 		}
 		return err
 	}
+}
+
+// staticInfo reports a fixed lifecycle state for /api/session and /healthz
+// in ditty's default per-Client mode, where no single Session's state
+// speaks for the whole run — there may be zero, one, or many independent
+// Commands alive at once, each its own Session.
+type staticInfo string
+
+func (s staticInfo) State() string { return string(s) }
+
+// activeSessions tracks every per-Client mode Command currently running,
+// so a SIGINT/SIGTERM shutdown can close all of them rather than leaking
+// child processes when ditty itself exits.
+type activeSessions struct {
+	mu    sync.Mutex
+	procs map[string]*pty.Process
+}
+
+func newActiveSessions() *activeSessions {
+	return &activeSessions{procs: make(map[string]*pty.Process)}
+}
+
+func (a *activeSessions) add(id string, p *pty.Process) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.procs[id] = p
+}
+
+func (a *activeSessions) remove(id string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.procs, id)
+}
+
+// closeAll closes every currently tracked Command. Process.Close blocks
+// until its Command is reaped, so this is called with the lock released.
+func (a *activeSessions) closeAll() {
+	a.mu.Lock()
+	procs := make([]*pty.Process, 0, len(a.procs))
+	for _, p := range a.procs {
+		procs = append(procs, p)
+	}
+	a.mu.Unlock()
+	for _, p := range procs {
+		_ = p.Close()
+	}
+}
+
+// gracefulShutdown stops server from accepting new connections, then closes
+// process — which drives internal/session's existing exit path: it
+// broadcasts Exit to every still-attached Client before the Session itself
+// closes (SPEC.md §3), so shutdown needs no separate Notice-then-close API
+// of its own. It returns once both the listener and the Session have
+// finished closing.
+func gracefulShutdown(server *http.Server, process *pty.Process, hub *session.Hub) error {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	shutdownErr := server.Shutdown(shutdownCtx)
+	_ = process.Close()
+	<-hub.Done()
+	return shutdownErr
+}
+
+// buildCommand assembles a pty.Command from the resolved Command flags
+// (SPEC.md §8.1).
+func buildCommand(resolver *config.Resolver, argv []string, sessionID string) (pty.Command, error) {
+	uid, err := parseUint32Ptr(resolver.String("uid"))
+	if err != nil {
+		return pty.Command{}, fmt.Errorf("--uid: %w", err)
+	}
+	gid, err := parseUint32Ptr(resolver.String("gid"))
+	if err != nil {
+		return pty.Command{}, fmt.Errorf("--gid: %w", err)
+	}
+	killSignal, err := pty.ParseSignal(resolver.String("kill-signal"))
+	if err != nil {
+		return pty.Command{}, fmt.Errorf("--kill-signal: %w", err)
+	}
+
+	return pty.Command{
+		Argv:       argv,
+		Cwd:        resolver.String("cwd"),
+		Env:        resolver.StringSlice("env"),
+		Term:       resolver.String("term"),
+		UID:        uid,
+		GID:        gid,
+		KillSignal: killSignal,
+		Cols:       uint16(resolver.Int("cols")),
+		Rows:       uint16(resolver.Int("rows")),
+		SessionID:  sessionID,
+	}, nil
+}
+
+// parseUint32Ptr parses s as a uint32, returning nil for an empty string
+// ("don't set this credential").
+func parseUint32Ptr(s string) (*uint32, error) {
+	if s == "" {
+		return nil, nil
+	}
+	v, err := strconv.ParseUint(s, 10, 32)
+	if err != nil {
+		return nil, err
+	}
+	v32 := uint32(v)
+	return &v32, nil
+}
+
+// detachGrace resolves --detach-grace, honouring --exit-on-detach's
+// shorthand for a zero grace period (SPEC.md §3.1).
+func detachGrace(resolver *config.Resolver) time.Duration {
+	if resolver.Bool("exit-on-detach") {
+		return 0
+	}
+	return resolver.Duration("detach-grace")
+}
+
+// buildProfile applies the resolved --profile-* flags onto
+// internal/profile's default Profile and JSON-encodes it into the shape
+// internal/session seeds every Hello.Profile with (SPEC.md §7).
+func buildProfile(resolver *config.Resolver) (json.RawMessage, error) {
+	p := profile.Default()
+	p.Theme = resolver.String("profile-theme")
+	p.FontFamily = resolver.String("profile-font-family")
+	p.FontSize = resolver.Int("profile-font-size")
+	p.CursorStyle = resolver.String("profile-cursor-style")
+	p.CursorBlink = resolver.Bool("profile-cursor-blink")
+	p.Renderer = resolver.String("profile-renderer")
+	p.CopyOnSelect = resolver.Bool("profile-copy-on-select")
+	p.BellStyle = resolver.String("profile-bell")
+	return p.Marshal()
+}
+
+// expandTitle expands --title's {command}/{hostname} placeholders. args is
+// the Command's own argv, i.e. everything after `--`.
+func expandTitle(template string, args []string) string {
+	hostname, _ := os.Hostname()
+	replacer := strings.NewReplacer(
+		"{command}", strings.Join(args, " "),
+		"{hostname}", hostname,
+	)
+	return replacer.Replace(template)
+}
+
+// compileOriginAllow compiles --origin-allow's regex, or returns nil for an
+// empty pattern (the same-host default).
+func compileOriginAllow(pattern string) (*regexp.Regexp, error) {
+	if pattern == "" {
+		return nil, nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("--origin-allow: %w", err)
+	}
+	return re, nil
+}
+
+// randomSessionID generates the Session's own ID (SPEC.md §1) when --name
+// is not given.
+func randomSessionID() (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

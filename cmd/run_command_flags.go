@@ -20,7 +20,9 @@ func registerCommandFlags(fs *pflag.FlagSet) {
 	fs.Uint16P("cols", "y", 0, "fixed PTY column count (0 = dynamic, sized by the first Client)")
 	fs.Uint16P("rows", "z", 0, "fixed PTY row count (0 = dynamic, sized by the first Client)")
 
-	fs.BoolP("once", "Z", false, "accept exactly one Client, ever; exit after it detaches")
+	fs.BoolP("once", "Z", false,
+		"accept exactly one Client, ever, across the whole run; ditty itself exits once that "+
+			"Client's Command ends (matches gotty's --once)")
 	fs.BoolP("exit-on-detach", "x", false, "shorthand for --detach-grace 0s plus exiting the process")
 	fs.DurationP("wait-for-client", "W", 0,
 		"exit if no Client attaches within this duration (0 = forever)")

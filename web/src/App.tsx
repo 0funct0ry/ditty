@@ -45,11 +45,21 @@ export default function App() {
   const [readOnlyToast, setReadOnlyToast] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  // Hello.session.cols/rows is the size at attach time only (0x0 for a
+  // dynamically-sized Session, SPEC.md §5.4) — there is no protocol frame
+  // that echoes a live resize back, so the status bar tracks the terminal's
+  // actual current size from Terminal's own onResize calls instead.
+  const [liveDims, setLiveDims] = useState<{ cols: number; rows: number } | null>(null);
 
   const { state, hello, roster, exit, writable, sizing, rejectReason, send, resize, retryNow } = useDittyConnection(
     wsURL(),
     { onOutput: (data) => writeRef.current?.(data) },
   );
+
+  const handleResize = (cols: number, rows: number) => {
+    setLiveDims({ cols, rows });
+    resize(cols, rows);
+  };
 
   const rosterNote = useRosterNote(roster);
   const { profile, setProfile, resetToServerDefaults, locked } = useProfile(hello);
@@ -126,7 +136,7 @@ export default function App() {
           sizing={sizing}
           writeRef={writeRef}
           onInput={send}
-          onResize={resize}
+          onResize={handleResize}
           onReadOnlyKeystroke={() => setReadOnlyToast(true)}
         />
         {readOnlyToast && <ReadOnlyToast />}
@@ -158,8 +168,8 @@ export default function App() {
         )}
       </div>
       <StatusBar
-        cols={hello?.session.cols ?? 0}
-        rows={hello?.session.rows ?? 0}
+        cols={liveDims?.cols ?? hello?.session.cols ?? 0}
+        rows={liveDims?.rows ?? hello?.session.rows ?? 0}
         sizing={sizing}
         startedAt={hello?.session.startedAt}
         rosterNote={rosterNote}

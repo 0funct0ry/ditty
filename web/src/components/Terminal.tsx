@@ -139,7 +139,13 @@ export function Terminal({ profile, writable, sizing, writeRef, onInput, onResiz
 
     const resizeObserver = new ResizeObserver(() => {
       fit.fit();
-      if (sizingRef.current) {
+      // A container mid-reflow (e.g. before fonts/layout have settled) can
+      // make FitAddon compute a degenerate 0-or-negative size for a single
+      // observation; never forward that to the PTY — SPEC.md §5.1's own
+      // clamp floor (10x5) would mask it as a small-but-valid Resize rather
+      // than surfacing the real, still-correct container size once layout
+      // finishes settling.
+      if (sizingRef.current && term.cols > 0 && term.rows > 0) {
         onResizeRef.current(term.cols, term.rows);
       }
     });
@@ -162,6 +168,47 @@ export function Terminal({ profile, writable, sizing, writeRef, onInput, onResiz
       applyProfile(termRef.current, profile);
     }
   }, [profile]);
+
+  // Becoming the sizing Client (on Hello, or on a sizing handover) is not a
+  // physical container resize, so ResizeObserver never fires for it on its
+  // own — without this, the PTY stays at whatever size Spawn defaulted to
+  // (SPEC.md §5.4) until the browser window happens to resize later. Fit and
+  // send the terminal's already-correct computed size the moment sizing is
+  // granted. This can land in the same tick as first mount/Hello, before the
+  // browser has finished a layout+paint pass for a freshly-opened tab (fonts
+  // still loading, initial reflow not settled) — FitAddon.fit() can compute
+  // a degenerate 0-or-tiny size in that instant, which would otherwise get
+  // sent, clamped server-side to SPEC.md §5.1's floor, and silently stick
+  // for the rest of the session with nothing to correct it (a container
+  // whose real pixel size never changes again never re-fires
+  // ResizeObserver). Defer past two animation frames — one for layout, one
+  // for paint — before trusting the computed size, and never send a
+  // non-positive one regardless.
+  useEffect(() => {
+    if (!sizing) return;
+    let cancelled = false;
+    const rafHandles: number[] = [];
+    rafHandles.push(
+      requestAnimationFrame(() => {
+        rafHandles.push(
+          requestAnimationFrame(() => {
+            if (cancelled) return;
+            const term = termRef.current;
+            const fit = fitRef.current;
+            if (!term || !fit) return;
+            fit.fit();
+            if (term.cols > 0 && term.rows > 0) {
+              onResizeRef.current(term.cols, term.rows);
+            }
+          }),
+        );
+      }),
+    );
+    return () => {
+      cancelled = true;
+      rafHandles.forEach((h) => cancelAnimationFrame(h));
+    };
+  }, [sizing]);
 
   // Renderer switch: swap the WebGL addon in/out without touching layout —
   // this must never trigger a fit()/Resize, since a settings change should

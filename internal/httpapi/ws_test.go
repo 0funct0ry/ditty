@@ -2,10 +2,13 @@ package httpapi
 
 import (
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -90,31 +93,11 @@ func (p *scriptedProcess) Wait() (pty.ExitStatus, error) {
 	return pty.ExitStatus{}, nil
 }
 
-// sessionClientAdapter satisfies internal/session's Client interface over
-// an httpapi.Client, hardcoding the write capability tests need — real
-// write-capability plumbing (Grants, roles) arrives in M11/M12.
-type sessionClientAdapter struct {
-	httpClient Client
-	writable   bool
+// staticHub is a HubFactory that always returns the same Hub, matching
+// --shared mode — the shape most of this file's tests exercise.
+func staticHub(hub Hub) HubFactory {
+	return func() (Hub, error) { return hub, nil }
 }
-
-func (a sessionClientAdapter) ID() string                    { return a.httpClient.ID() }
-func (a sessionClientAdapter) Label() string                 { return a.httpClient.Label() }
-func (a sessionClientAdapter) Writable() bool                { return a.writable }
-func (a sessionClientAdapter) Send(frame []byte) error       { return a.httpClient.Send(frame) }
-func (a sessionClientAdapter) Close(code int, reason string) { a.httpClient.Close(code, reason) }
-
-// sessionHubAdapter bridges *session.Hub to httpapi.Hub for tests, the
-// same way M10's real transport wiring will (see Client's doc comment in
-// ws.go for why an adapter, not a shared type, is needed).
-type sessionHubAdapter struct{ hub *session.Hub }
-
-func (a sessionHubAdapter) Attach(c Client) error {
-	return a.hub.Attach(sessionClientAdapter{httpClient: c})
-}
-func (a sessionHubAdapter) Detach(id string)                 { a.hub.Detach(id) }
-func (a sessionHubAdapter) Input(id string, data []byte)     { a.hub.Input(id, data) }
-func (a sessionHubAdapter) Resize(id string, cols, rows int) { a.hub.Resize(id, cols, rows) }
 
 func newTestSessionHub(name string) (*session.Hub, *scriptedProcess) {
 	p := newScriptedProcess()
@@ -136,7 +119,7 @@ func newTestSessionHub(name string) (*session.Hub, *scriptedProcess) {
 func TestWSHandler_HelloFirst(t *testing.T) {
 	hub, p := newTestSessionHub("deploy")
 	defer func() { _ = p.Close() }()
-	server := httptest.NewServer(NewWSHandler(sessionHubAdapter{hub: hub}))
+	server := httptest.NewServer(NewWSHandler(staticHub(NewSessionHub(hub, true)), WSOptions{}))
 	defer server.Close()
 
 	conn := dial(t, wsURL(server), []string{wire.Subprotocol})
@@ -165,7 +148,7 @@ func TestWSHandler_HelloFirst(t *testing.T) {
 func TestWSHandler_WrongSubprotocolCloses(t *testing.T) {
 	hub, p := newTestSessionHub("deploy")
 	defer func() { _ = p.Close() }()
-	server := httptest.NewServer(NewWSHandler(sessionHubAdapter{hub: hub}))
+	server := httptest.NewServer(NewWSHandler(staticHub(NewSessionHub(hub, true)), WSOptions{}))
 	defer server.Close()
 
 	conn := dial(t, wsURL(server), []string{"not-ditty"})
@@ -187,7 +170,7 @@ func TestWSHandler_WrongSubprotocolCloses(t *testing.T) {
 func TestWSHandler_DisconnectReconnect_ReplaysOutput(t *testing.T) {
 	hub, p := newTestSessionHub("flaky")
 	defer func() { _ = p.Close() }()
-	server := httptest.NewServer(NewWSHandler(sessionHubAdapter{hub: hub}))
+	server := httptest.NewServer(NewWSHandler(staticHub(NewSessionHub(hub, true)), WSOptions{}))
 	defer server.Close()
 
 	p.feed([]byte("connected — streaming logs"))
@@ -232,5 +215,176 @@ func TestWSHandler_DisconnectReconnect_ReplaysOutput(t *testing.T) {
 	}
 	if !sawReconnected {
 		t.Fatal("reconnect did not receive replayed output emitted during the drop")
+	}
+}
+
+func TestWSHandler_CrossOriginUpgradeRejected403(t *testing.T) {
+	hub, p := newTestSessionHub("deploy")
+	defer func() { _ = p.Close() }()
+	server := httptest.NewServer(NewWSHandler(staticHub(NewSessionHub(hub, true)), WSOptions{}))
+	defer server.Close()
+
+	dialer := websocket.Dialer{Subprotocols: []string{wire.Subprotocol}, HandshakeTimeout: 5 * time.Second}
+	header := http.Header{"Origin": {"http://evil.example"}}
+	_, resp, err := dialer.Dial(wsURL(server), header)
+	if err == nil {
+		t.Fatal("expected the cross-origin upgrade to fail")
+	}
+	if resp == nil {
+		t.Fatal("expected an HTTP response alongside the dial error")
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
+	}
+}
+
+func TestWSHandler_OriginAllowRegexOverride(t *testing.T) {
+	hub, p := newTestSessionHub("deploy")
+	defer func() { _ = p.Close() }()
+	opts := WSOptions{OriginAllow: regexp.MustCompile(`^https?://evil\.example$`)}
+	server := httptest.NewServer(NewWSHandler(staticHub(NewSessionHub(hub, true)), opts))
+	defer server.Close()
+
+	dialer := websocket.Dialer{Subprotocols: []string{wire.Subprotocol}, HandshakeTimeout: 5 * time.Second}
+	header := http.Header{"Origin": {"http://evil.example"}}
+	conn, resp, err := dialer.Dial(wsURL(server), header)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	defer func() { _ = conn.Close() }()
+}
+
+func TestWSHandler_MaxClientsRejects1013(t *testing.T) {
+	p := newScriptedProcess()
+	defer func() { _ = p.Close() }()
+	hub := session.NewHub(session.Options{
+		Process:       p,
+		Name:          "deploy",
+		Server:        "ditty-test",
+		FlushInterval: time.Millisecond,
+		MaxClients:    1,
+	})
+	server := httptest.NewServer(NewWSHandler(staticHub(NewSessionHub(hub, true)), WSOptions{}))
+	defer server.Close()
+
+	first := dial(t, wsURL(server), []string{wire.Subprotocol})
+	defer func() { _ = first.Close() }()
+	if _, _, err := first.ReadMessage(); err != nil {
+		t.Fatalf("first Hello: %v", err)
+	}
+
+	second := dial(t, wsURL(server), []string{wire.Subprotocol})
+	defer func() { _ = second.Close() }()
+	_, _, err := second.ReadMessage()
+	if err == nil {
+		t.Fatal("expected the second Client to be rejected")
+	}
+	closeErr, ok := err.(*websocket.CloseError)
+	if !ok {
+		t.Fatalf("expected a close error, got %T: %v", err, err)
+	}
+	if closeErr.Code != 1013 {
+		t.Fatalf("close code = %d, want 1013", closeErr.Code)
+	}
+}
+
+// drainUntilClose reads and discards data frames on conn until it errors
+// (a close, or the deadline already set on conn), returning that error —
+// letting tests skip past incidental frames (Roster, and so on) that a
+// fixed read count would fail on.
+func drainUntilClose(conn *websocket.Conn) error {
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return err
+		}
+	}
+}
+
+func TestWSHandler_TextFrameCloses1003(t *testing.T) {
+	hub, p := newTestSessionHub("deploy")
+	defer func() { _ = p.Close() }()
+	server := httptest.NewServer(NewWSHandler(staticHub(NewSessionHub(hub, true)), WSOptions{}))
+	defer server.Close()
+
+	conn := dial(t, wsURL(server), []string{wire.Subprotocol})
+	defer func() { _ = conn.Close() }()
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("Hello: %v", err)
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("hello")); err != nil {
+		t.Fatalf("write text frame: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	err := drainUntilClose(conn)
+	closeErr, ok := err.(*websocket.CloseError)
+	if !ok {
+		t.Fatalf("expected a close error, got %T: %v", err, err)
+	}
+	if closeErr.Code != websocket.CloseUnsupportedData {
+		t.Fatalf("close code = %d, want %d", closeErr.Code, websocket.CloseUnsupportedData)
+	}
+}
+
+func TestWSHandler_PingKeepsConnectionAlive(t *testing.T) {
+	hub, p := newTestSessionHub("deploy")
+	defer func() { _ = p.Close() }()
+	opts := WSOptions{PingInterval: 20 * time.Millisecond}
+	server := httptest.NewServer(NewWSHandler(staticHub(NewSessionHub(hub, true)), opts))
+	defer server.Close()
+
+	conn := dial(t, wsURL(server), []string{wire.Subprotocol})
+	defer func() { _ = conn.Close() }()
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("Hello: %v", err)
+	}
+
+	var pings atomic.Int32
+	conn.SetPingHandler(func(string) error {
+		pings.Add(1)
+		return conn.WriteControl(websocket.PongMessage, nil, time.Now().Add(time.Second))
+	})
+
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		_ = drainUntilClose(conn) // unblocked by this test's own conn.Close()
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for pings.Load() < 3 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	_ = conn.Close()
+	<-readDone
+
+	if got := pings.Load(); got < 3 {
+		t.Fatalf("pings received = %d, want >= 3 within 2s", got)
+	}
+}
+
+func TestWSHandler_MissingPongTimesOut(t *testing.T) {
+	hub, p := newTestSessionHub("deploy")
+	defer func() { _ = p.Close() }()
+	// A tiny PingInterval makes the derived read deadline (2*interval+5s)
+	// small enough to observe within a test timeout, while still leaving
+	// server-sent pings unanswered by this raw connection.
+	opts := WSOptions{PingInterval: 5 * time.Millisecond}
+	server := httptest.NewServer(NewWSHandler(staticHub(NewSessionHub(hub, true)), opts))
+	defer server.Close()
+
+	conn := dial(t, wsURL(server), []string{wire.Subprotocol})
+	defer func() { _ = conn.Close() }()
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("Hello: %v", err)
+	}
+	// Swallow pings without replying, simulating a peer that never pongs.
+	conn.SetPingHandler(func(string) error { return nil })
+
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if err := drainUntilClose(conn); err == nil {
+		t.Fatal("expected the server to close a connection that never pongs")
 	}
 }
