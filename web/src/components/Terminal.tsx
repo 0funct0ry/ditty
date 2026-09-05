@@ -236,7 +236,7 @@ export function Terminal({ profile, writable, sizing, writeRef, onInput, onResiz
   }, [profile?.renderer]);
 
   return (
-    <div className="relative h-full w-full bg-ink-deep">
+    <div className="relative h-full w-full bg-[var(--ditty-terminal-bg)]">
       <div ref={containerRef} className="h-full w-full" />
       {bellFlash && <div className="pointer-events-none absolute inset-0 bg-white/10" />}
       {rendererFallback && (

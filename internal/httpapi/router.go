@@ -60,9 +60,18 @@ type Options struct {
 	// TokenGrant, when non-nil, backs /t/:token's path-to-cookie exchange
 	// (SPEC.md §4.1) and /api/logout's cookie clearing.
 	TokenGrant *security.TokenGrant
+	// JWTGrant, when non-nil (--auth-db configured), backs /api/login and
+	// /api/refresh (SPEC.md §6.2, §9) and is included in /api/logout's
+	// teardown. Nil means --auth-db was not passed, so these routes are
+	// never registered at all.
+	JWTGrant *security.JWTGrant
 	// HeaderEnv is the set of --header-env mappings (SPEC.md §6.4) resolved
 	// against each WebSocket upgrade's request headers.
 	HeaderEnv []security.HeaderEnvMapping
+	// OnAttach and OnDetach, when non-nil, audit every WebSocket
+	// attach/detach (SPEC.md §9). See WSOptions' matching fields.
+	OnAttach func(identity security.Identity)
+	OnDetach func(identity security.Identity)
 }
 
 // NewRouter builds the full SPEC.md §4 route table under opts.BasePath.
@@ -90,14 +99,37 @@ func NewRouter(opts Options) (http.Handler, error) {
 	}
 	group.GET("/t/:token", tokenExchangeHandler(opts.TokenGrant, rootPath))
 
-	protected := group.Group("")
-	protected.Use(grantMiddleware(opts.Grants))
-	protected.GET("/", indexHandler(index))
-	protected.GET("/favicon.ico", faviconHandler)
-	protected.GET("/assets/*filepath", assetsHandler(basePath))
-	protected.GET("/api/session", sessionHandler(opts))
-	protected.GET("/api/profile", profileHandler(opts.Profile))
-	protected.POST("/api/logout", logoutHandler(opts.TokenGrant))
+	// The page itself (the embedded SPA and its assets) is gated only by
+	// Grants that authenticate at the network/protocol layer before any
+	// HTML is ever served — Token (via /t/:token), Basic (the browser's own
+	// credential prompt), mTLS, TrustedHeader. JWTGrant is deliberately
+	// excluded here: a username/password login has no such pre-HTML step,
+	// so the SPA must be able to load unauthenticated in order to render
+	// its own login screen and call /api/login. Gating "/" behind JWTGrant
+	// too would make that screen unreachable — the exact bug this avoids.
+	page := group.Group("")
+	page.Use(grantMiddleware(nonJWTGrants(opts.Grants, opts.JWTGrant)))
+	page.GET("/", indexHandler(index))
+	page.GET("/favicon.ico", faviconHandler)
+	page.GET("/assets/*filepath", assetsHandler(basePath))
+
+	// /api/*, /ws stay gated by every configured Grant, JWT included: this
+	// is the layer the SPA actually probes (a 401 from /api/session is how
+	// it decides to show the login screen at all) and the layer that must
+	// never be reachable without a real Grant.
+	api := group.Group("")
+	api.Use(grantMiddleware(opts.Grants))
+	api.GET("/api/session", sessionHandler(opts))
+	api.GET("/api/profile", profileHandler(opts.Profile))
+	api.POST("/api/logout", logoutHandler(opts.TokenGrant, opts.JWTGrant))
+
+	// /api/login and /api/refresh are unauthenticated by design (a request
+	// carries no Grant yet when it logs in) and only exist at all when
+	// --auth-db was passed — no route surface appears otherwise.
+	if opts.JWTGrant != nil {
+		group.POST("/api/login", loginHandler(opts.JWTGrant))
+		group.POST("/api/refresh", refreshHandler(opts.JWTGrant))
+	}
 
 	if opts.HubFactory != nil {
 		wsHandler := NewWSHandler(opts.HubFactory, WSOptions{
@@ -105,11 +137,31 @@ func NewRouter(opts Options) (http.Handler, error) {
 			PingInterval: opts.PingInterval,
 			Grants:       opts.Grants,
 			HeaderEnv:    opts.HeaderEnv,
+			OnAttach:     opts.OnAttach,
+			OnDetach:     opts.OnDetach,
 		})
-		protected.GET("/ws", gin.WrapH(wsHandler))
+		api.GET("/ws", gin.WrapH(wsHandler))
 	}
 
 	return engine, nil
+}
+
+// nonJWTGrants returns grants with jwtGrant removed (a no-op copy when
+// jwtGrant is nil or absent from grants) — see the page-vs-api route
+// split in NewRouter for why the page-serving routes must never be gated
+// by the JWT Grant specifically.
+func nonJWTGrants(grants security.Grants, jwtGrant *security.JWTGrant) security.Grants {
+	if jwtGrant == nil {
+		return grants
+	}
+	out := make(security.Grants, 0, len(grants))
+	for _, g := range grants {
+		if g == security.Grant(jwtGrant) {
+			continue
+		}
+		out = append(out, g)
+	}
+	return out
 }
 
 // grantMiddleware admits every request when no Grant is configured (the

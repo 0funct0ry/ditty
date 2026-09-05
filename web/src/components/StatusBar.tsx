@@ -15,7 +15,7 @@ export function StatusBar({ cols, rows, sizing, startedAt, rosterNote }: StatusB
   const elapsed = useElapsedClock(startedAt);
 
   return (
-    <div className="flex h-status shrink-0 items-center gap-3 border-t border-[var(--ditty-chrome-border)] bg-[var(--ditty-chrome-bg)] px-3 font-mono text-xs text-muted-bright">
+    <div className="flex h-status shrink-0 items-center gap-3 border-t border-[var(--ditty-chrome-border)] bg-[var(--ditty-chrome-bg)] px-3 font-mono text-xs text-[var(--ditty-chrome-muted)]">
       <span className="border-r border-[var(--ditty-chrome-border)] pr-3">
         {cols}×{rows}
       </span>

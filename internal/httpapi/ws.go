@@ -58,8 +58,13 @@ type Hub interface {
 // this connection's resolved --header-env additions (SPEC.md §6.4), already
 // filtered and truncated by security.Resolve against the live request —
 // HubFactory itself never sees the *http.Request, keeping internal/security
-// as the only place that touches raw header values.
-type HubFactory func(headerEnv []string) (Hub, error)
+// as the only place that touches raw header values. identity is the Grant
+// that admitted this connection's Identity (SPEC.md §9): a HubFactory
+// combines identity.Role with the Session-wide --writable flag to decide
+// this connection's write capability (operator writes only when -w is set,
+// viewer never writes, no role falls back to -w alone), enforced in the
+// Hub via the Client's capability, not the UI.
+type HubFactory func(headerEnv []string, identity security.Identity) (Hub, error)
 
 // WSOptions configures NewWSHandler's origin check, keepalive and auth.
 type WSOptions struct {
@@ -81,6 +86,13 @@ type WSOptions struct {
 	// HeaderEnv is the set of --header-env mappings (SPEC.md §6.4) resolved
 	// against each upgrade's request headers and handed to HubFactory.
 	HeaderEnv []security.HeaderEnvMapping
+	// OnAttach and OnDetach, when non-nil, are called around every
+	// successful Hub.Attach (SPEC.md §9's attach/detach audit actions).
+	// identity.Label is used as the audited actor; injected rather than
+	// importing internal/store directly, keeping this package's only
+	// dependency on --auth-db state through cmd/run.go's wiring.
+	OnAttach func(identity security.Identity)
+	OnDetach func(identity security.Identity)
 }
 
 // checkOrigin implements SPEC.md §6.3: no Origin header (a non-browser
@@ -155,7 +167,7 @@ func NewWSHandler(newHub HubFactory, opts WSOptions) http.Handler {
 		}
 		client := &wsClient{id: id, label: label, conn: conn}
 
-		hub, err := newHub(headerEnv)
+		hub, err := newHub(headerEnv, identity)
 		if err != nil {
 			closeConn(conn, websocket.CloseTryAgainLater, err.Error())
 			return
@@ -169,7 +181,13 @@ func NewWSHandler(newHub HubFactory, opts WSOptions) http.Handler {
 			closeConn(conn, code, reason)
 			return
 		}
+		if opts.OnAttach != nil {
+			opts.OnAttach(identity)
+		}
 		defer hub.Detach(id)
+		if opts.OnDetach != nil {
+			defer opts.OnDetach(identity)
+		}
 
 		_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
 		conn.SetPongHandler(func(string) error {

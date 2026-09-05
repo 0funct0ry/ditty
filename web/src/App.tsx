@@ -12,13 +12,13 @@ import { useRosterNote } from "./hooks/useRosterNote";
 import { useProfile } from "./hooks/useProfile";
 import { useAuth } from "./hooks/useAuth";
 import { resolveChromeTint, resolveTheme } from "./protocol/themes";
-import { FixtureAuthClient, fixtureAuthRequired, fixtureExpectedRole } from "./protocol/fixtureAuthClient";
+import { HttpAuthClient, probeAuthState } from "./protocol/httpAuthClient";
 
-// Constructed once at the composition root (SPEC.md §12 M7) — App and its
-// children depend on the AuthClient interface only, so M12 can swap this
-// for a real HTTP-backed client without touching a component.
-const authClient = new FixtureAuthClient();
-const authRequired = fixtureAuthRequired();
+// Constructed once at the composition root (SPEC.md §12 M7): App and its
+// children depend on the AuthClient interface only. M7 built this login
+// screen against a fixture responder; M12 swaps in the real HTTP-backed
+// client here, with no other component touched.
+const authClient = new HttpAuthClient();
 
 function wsURL(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -45,6 +45,16 @@ export default function App() {
   const [readOnlyToast, setReadOnlyToast] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  // There is no synchronous Hello field for "does this session require
+  // sign-in" (SPEC.md §9 predates a wire-protocol change for it) — the one
+  // endpoint every Grant type already gates uniformly is /api/session, so
+  // this probes it once at mount instead of reading a static flag.
+  // authAlready tracks a page refresh after a successful sign-in: the
+  // browser's cookie already admits /api/session (a 200), but that alone
+  // is indistinguishable from "no JWT configured at all" without also
+  // reading the response body's authRequired field (see probeAuthState).
+  const [authRequired, setAuthRequired] = useState(false);
+  const [authAlready, setAuthAlready] = useState(false);
   // Hello.session.cols/rows is the size at attach time only (0x0 for a
   // dynamically-sized Session, SPEC.md §5.4) — there is no protocol frame
   // that echoes a live resize back, so the status bar tracks the terminal's
@@ -63,9 +73,33 @@ export default function App() {
 
   const rosterNote = useRosterNote(roster);
   const { profile, setProfile, resetToServerDefaults, locked } = useProfile(hello);
-  const auth = useAuth(authClient, authRequired);
+  const auth = useAuth(authClient, authRequired, authAlready);
   const chromeTint = resolveChromeTint(profile);
   const terminalTheme = resolveTheme(profile);
+
+  useEffect(() => {
+    let cancelled = false;
+    void probeAuthState().then(({ required, authenticated }) => {
+      if (cancelled) return;
+      setAuthRequired(required);
+      setAuthAlready(authenticated);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Signing in sets the WS-gating cookie, but the WebSocket already
+  // attempted (and was rejected 401) before that cookie existed; its own
+  // backoff would eventually retry on its own, but retrying immediately
+  // on a successful sign-in avoids waiting out that backoff window.
+  const wasAuthed = useRef(auth.status === "authed");
+  useEffect(() => {
+    if (authRequired && !wasAuthed.current && auth.status === "authed") {
+      retryNow();
+    }
+    wasAuthed.current = auth.status === "authed";
+  }, [authRequired, auth.status, retryNow]);
 
   useEffect(() => {
     if (!readOnlyToast) return;
@@ -100,6 +134,8 @@ export default function App() {
           "--ditty-chrome-bg": chromeTint.bg,
           "--ditty-chrome-border": chromeTint.border,
           "--ditty-chrome-accent": chromeTint.accent,
+          "--ditty-chrome-fg": chromeTint.fg,
+          "--ditty-chrome-muted": chromeTint.fgMuted,
           "--ditty-terminal-bg": terminalTheme.background,
         } as React.CSSProperties
       }
@@ -114,7 +150,7 @@ export default function App() {
           sessionTitle={sessionTitle}
           status={auth.status}
           error={auth.error}
-          role={fixtureExpectedRole()}
+          role={auth.role ?? "viewer"}
           onSubmit={(username, password) => void auth.login(username, password)}
         />
       )}

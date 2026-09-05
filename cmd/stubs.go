@@ -7,15 +7,15 @@ import (
 )
 
 // v1.1+ subcommand names, reserved now so muscle memory doesn't break
-// later (SPEC.md §8.2). `users` is real from M12; `serve`, `ls`, `kill`,
-// `attach`, `record`, `play`, `doctor` are v1.1 (SPEC.md §12). Each is
-// hidden and exits non-zero explaining itself — none has its own flags
-// yet, so there is nothing to register per subcommand.
+// later (SPEC.md §8.2). `serve`, `ls`, `kill`, `attach`, `record`, `play`,
+// `doctor` are v1.1 (SPEC.md §12); `users` was this table's last pre-v1.0
+// entry and is real from M12 (cmd/users.go). Each stub is hidden and exits
+// non-zero explaining itself — none has its own flags yet, so there is
+// nothing to register per subcommand.
 var stubCommands = []struct {
 	name      string
 	milestone string
 }{
-	{"users", "M12"},
 	{"serve", "M15"},
 	{"ls", "M16"},
 	{"kill", "M16"},

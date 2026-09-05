@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/0funct0ry/ditty/internal/config"
 	"github.com/0funct0ry/ditty/internal/security"
+	"github.com/0funct0ry/ditty/internal/store"
 )
 
 // errSilent is returned by execRun when it has already printed the relevant
@@ -72,6 +75,9 @@ type securityConfig struct {
 	argPattern   string
 
 	headerEnvMappings []security.HeaderEnvMapping
+
+	authDBPath string
+	jwtSecret  string // "" when --auth-db is unset; otherwise literal or randomly generated below
 }
 
 // resolveSecurityFlags parses and validates every §6 flag, generating the
@@ -134,19 +140,39 @@ func resolveSecurityFlags(resolver *config.Resolver) (securityConfig, []string, 
 		return cfg, nil, err
 	}
 
+	cfg.authDBPath = resolver.String("auth-db")
+	if cfg.authDBPath != "" {
+		jwtSecret := resolver.String("jwt-secret")
+		if jwtSecret == "" {
+			// A random per-run secret (SPEC.md §6.2): restarting ditty
+			// invalidates every JWT session, the same story --token already
+			// tells for its own restart behaviour.
+			b := make([]byte, 32)
+			if _, err := rand.Read(b); err != nil {
+				return cfg, nil, fmt.Errorf("--jwt-secret: %w", err)
+			}
+			jwtSecret = hex.EncodeToString(b)
+		}
+		cfg.jwtSecret = jwtSecret
+		secrets = append(secrets, cfg.jwtSecret)
+	}
+
 	return cfg, secrets, nil
 }
 
 // buildGrants turns a resolved securityConfig into the active Grant set
 // (SPEC.md §6.2: any one admits), the TokenGrant (nil when tokens are
 // disabled, kept separate from Grants because /t/:token and /api/logout
-// need its Exchange method specifically), and the *tls.Config a TLS
-// listener needs (nil when neither --tls-cert nor --tls-key is set).
-// address is the address ditty is about to bind, used only to decide
-// whether --basic-auth over plaintext is refused (SPEC.md §6.2).
-func buildGrants(cfg securityConfig, basePath, address string, logger *slog.Logger) (security.Grants, *security.TokenGrant, error) {
+// need its Exchange method specifically), and the JWTGrant (nil unless
+// authStore is non-nil, i.e. --auth-db was passed). address is the address
+// ditty is about to bind, used only to decide whether --basic-auth over
+// plaintext is refused (SPEC.md §6.2).
+func buildGrants(cfg securityConfig, basePath, address string, logger *slog.Logger, authStore *store.Store) (
+	security.Grants, *security.TokenGrant, *security.JWTGrant, error,
+) {
 	var grants security.Grants
 	var tokenGrant *security.TokenGrant
+	var jwtGrant *security.JWTGrant
 
 	if cfg.tokenEnabled {
 		tokenGrant = security.NewTokenGrant(cfg.token, basePath, cfg.tlsCert != "", defaultTokenCookieTTL)
@@ -155,12 +181,12 @@ func buildGrants(cfg securityConfig, basePath, address string, logger *slog.Logg
 
 	if cfg.basicAuth != "" {
 		if cfg.tlsCert == "" && !cfg.insecureBasicOverHTTP && !security.IsLoopbackAddr(address) {
-			return nil, nil, fmt.Errorf(
+			return nil, nil, nil, fmt.Errorf(
 				"--basic-auth over plaintext on a non-loopback address requires --insecure-basic-over-http (SPEC.md §6.2)")
 		}
 		basicGrant, err := security.NewBasicGrant(cfg.basicAuth)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		grants = append(grants, basicGrant)
 	}
@@ -176,11 +202,16 @@ func buildGrants(cfg securityConfig, basePath, address string, logger *slog.Logg
 		} else {
 			thGrant, err := security.NewTrustedHeaderGrant(cfg.trustHeader, cfg.trustProxy)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			grants = append(grants, thGrant)
 		}
 	}
 
-	return grants, tokenGrant, nil
+	if authStore != nil {
+		jwtGrant = security.NewJWTGrant([]byte(cfg.jwtSecret), authStore, basePath, cfg.tlsCert != "")
+		grants = append(grants, jwtGrant)
+	}
+
+	return grants, tokenGrant, jwtGrant, nil
 }

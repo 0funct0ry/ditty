@@ -6,11 +6,21 @@ export type ThemeName = "ditty-dark" | "ditty-light" | "nord" | "dracula" | "sol
 /** Chrome tint that keeps the chrome bar / status bar visually agreeing
  * with the terminal's theme (CLAUDE.md/tailwind.config.ts design-token
  * note). Applied as CSS custom properties, not new Tailwind classes, so no
- * build step is needed per theme. */
+ * build step is needed per theme.
+ *
+ * fg/fgMuted exist because ChromeBar/StatusBar's *text* used to be a
+ * hardcoded light color (right for every dark chrome bg, illegible against
+ * ditty-light's near-white one) while only bg/border/accent were already
+ * theme-reactive CSS variables — every theme now supplies a text pair with
+ * contrast checked against its own bg. */
 export interface ChromeTint {
   bg: string;
   border: string;
   accent: string;
+  /** Primary chrome text (session name, badges, icon default state). */
+  fg: string;
+  /** Secondary chrome text (title, client count, "watching"). */
+  fgMuted: string;
 }
 
 export interface ThemeDefinition {
@@ -50,7 +60,7 @@ export const THEMES: Record<ThemeName, ThemeDefinition> = {
       brightCyan: "#3D9C87",
       brightWhite: "#ECEDE8",
     },
-    chrome: { bg: "#171B24", border: "#2C3342", accent: "#3D9C87" },
+    chrome: { bg: "#171B24", border: "#2C3342", accent: "#3D9C87", fg: "#E4E7EC", fgMuted: "#A6ADB9" },
   },
   "ditty-light": {
     label: "ditty light",
@@ -78,7 +88,7 @@ export const THEMES: Record<ThemeName, ThemeDefinition> = {
       brightCyan: "#3D9C87",
       brightWhite: "#0E1116",
     },
-    chrome: { bg: "#ECEDE8", border: "#D5D6CF", accent: "#2C7A6B" },
+    chrome: { bg: "#ECEDE8", border: "#D5D6CF", accent: "#2C7A6B", fg: "#171B24", fgMuted: "#5B6472" },
   },
   nord: {
     label: "nord",
@@ -106,7 +116,7 @@ export const THEMES: Record<ThemeName, ThemeDefinition> = {
       brightCyan: "#8FBCBB",
       brightWhite: "#ECEFF4",
     },
-    chrome: { bg: "#2E3440", border: "#3B4252", accent: "#88C0D0" },
+    chrome: { bg: "#2E3440", border: "#3B4252", accent: "#88C0D0", fg: "#ECEFF4", fgMuted: "#B7C1D1" },
   },
   dracula: {
     label: "dracula",
@@ -134,7 +144,7 @@ export const THEMES: Record<ThemeName, ThemeDefinition> = {
       brightCyan: "#A4FFFF",
       brightWhite: "#FFFFFF",
     },
-    chrome: { bg: "#282A36", border: "#44475A", accent: "#BD93F9" },
+    chrome: { bg: "#282A36", border: "#44475A", accent: "#BD93F9", fg: "#F8F8F2", fgMuted: "#BFC2D6" },
   },
   "solarized-dark": {
     label: "solarized",
@@ -162,7 +172,7 @@ export const THEMES: Record<ThemeName, ThemeDefinition> = {
       brightCyan: "#93A1A1",
       brightWhite: "#FDF6E3",
     },
-    chrome: { bg: "#073642", border: "#0A4B5C", accent: "#268BD2" },
+    chrome: { bg: "#073642", border: "#0A4B5C", accent: "#268BD2", fg: "#EEE8D5", fgMuted: "#93A1A1" },
   },
   monokai: {
     label: "monokai",
@@ -190,7 +200,7 @@ export const THEMES: Record<ThemeName, ThemeDefinition> = {
       brightCyan: "#A1EFE4",
       brightWhite: "#F9F8F5",
     },
-    chrome: { bg: "#272822", border: "#3E3D32", accent: "#A6E22E" },
+    chrome: { bg: "#272822", border: "#3E3D32", accent: "#A6E22E", fg: "#F8F8F2", fgMuted: "#BBB9AE" },
   },
 };
 

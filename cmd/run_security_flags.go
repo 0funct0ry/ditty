@@ -39,4 +39,9 @@ func registerSecurityFlags(fs *pflag.FlagSet) {
 
 	fs.StringArray("header-env", nil,
 		"map a request header into the Command's environment as Header:TARGET (repeatable, SPEC.md §6.4)")
+
+	fs.String("auth-db", "", "path to a SQLite file for username/password login (SPEC.md §9); manage users with `ditty users`")
+	fs.String("jwt-secret", "",
+		"HS256 signing secret for --auth-db sessions; a random per-run secret is used when unset, "+
+			"invalidating every session on restart")
 }

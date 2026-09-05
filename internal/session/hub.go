@@ -76,6 +76,14 @@ type Options struct {
 	// Clock is the time source for every lifecycle timer. Defaults to
 	// NewRealClock() when nil.
 	Clock Clock
+
+	// OnWriteDenied, when non-nil, is called every time an Input frame is
+	// dropped because its Client is not writable (SPEC.md §9's write_denied
+	// audit action). It is injected rather than imported so internal/session
+	// never needs to know about internal/store (CLAUDE.md's dependency
+	// direction); cmd/run.go wires it to store.RecordAudit when --auth-db is
+	// configured.
+	OnWriteDenied func(clientID, label string)
 }
 
 // defaultChunkBytes and defaultFlushInterval match SPEC.md §5.5's defaults.
@@ -119,6 +127,8 @@ type Hub struct {
 	profileLock  bool
 	waitTimer    Timer
 	detachTimer  Timer
+
+	onWriteDenied func(clientID, label string)
 
 	done chan struct{}
 }
@@ -168,6 +178,7 @@ func NewHub(opts Options) *Hub {
 		waitForClient: opts.WaitForClient,
 		detachGrace:   opts.DetachGrace,
 		exitOnDetach:  opts.ExitOnDetach,
+		onWriteDenied: opts.OnWriteDenied,
 
 		ring:        newRing(scrollback),
 		clients:     make(map[string]*attachedClient),
@@ -392,7 +403,11 @@ func (h *Hub) Input(id string, data []byte) {
 				Level: wire.NoticeLevelInfo, Message: "This session is read-only",
 			}))
 		}
+		label := ac.client.Label()
 		h.mu.Unlock()
+		if notify && h.onWriteDenied != nil {
+			h.onWriteDenied(id, label)
+		}
 		return
 	}
 

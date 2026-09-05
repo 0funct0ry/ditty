@@ -1,19 +1,26 @@
 // Package security implements SPEC.md §4.1 and §6: the Grant types that
-// admit a Client (Token, Basic, mTLS, TrustedHeader), the bind guard that
-// refuses to start an unauthenticated server on anything but loopback, TLS
-// setup, the header-env allowlist, the URL-arg gate, and log redaction. The
-// fourth Grant — SQLite/JWT login (--auth-db) — is internal/store's and
-// M12's job, not this package's.
+// admit a Client (Token, Basic, mTLS, TrustedHeader, JWT), the bind guard
+// that refuses to start an unauthenticated server on anything but loopback,
+// TLS setup, the header-env allowlist, the URL-arg gate, and log redaction.
 package security
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/0funct0ry/ditty/internal/store"
+)
 
 // Identity is what a Grant reports for a request it admits: a human-facing
-// label (SPEC.md §1's Client label) and the method that produced it, for
-// logging and audit.
+// label (SPEC.md §1's Client label), the method that produced it (for
+// logging and audit), and — for Grants with a role model (JWTGrant) — the
+// Role that determines write capability (SPEC.md §9: operator may write
+// when -w is set, viewer never writes). Role is empty for every Grant that
+// carries no role (Token, Basic, mTLS, TrustedHeader); those fall back to
+// the Session-wide -w flag deciding write capability alone.
 type Identity struct {
 	Label  string
 	Method string
+	Role   string
 }
 
 // Grant authenticates an inbound request, admitting or rejecting it.
@@ -21,6 +28,17 @@ type Identity struct {
 // checked (SPEC.md §6, redact.go handles the log side).
 type Grant interface {
 	Authenticate(r *http.Request) (Identity, bool)
+}
+
+// RoleAllowsWrite reports whether role permits write capability at all,
+// independent of the Session-wide --writable flag (SPEC.md §9): operator
+// may write when -w is set, viewer never writes even under -w — the actual
+// write capability is writable && RoleAllowsWrite(role). A Grant that
+// carries no role (Token, Basic, mTLS, TrustedHeader) reports role == "",
+// which falls back to -w alone deciding write capability, matching every
+// Grant that predates M12.
+func RoleAllowsWrite(role string) bool {
+	return role != store.RoleViewer
 }
 
 // Grants is an ordered set of active Grants (SPEC.md §6.2: "Multiple Grants

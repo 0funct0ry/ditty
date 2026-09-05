@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/0funct0ry/ditty/internal/pty"
+	"github.com/0funct0ry/ditty/internal/security"
 	"github.com/0funct0ry/ditty/internal/session"
 	"github.com/0funct0ry/ditty/internal/wire"
 )
@@ -96,7 +97,7 @@ func (p *scriptedProcess) Wait() (pty.ExitStatus, error) {
 // staticHub is a HubFactory that always returns the same Hub, matching
 // --shared mode — the shape most of this file's tests exercise.
 func staticHub(hub Hub) HubFactory {
-	return func([]string) (Hub, error) { return hub, nil }
+	return func([]string, security.Identity) (Hub, error) { return hub, nil }
 }
 
 func newTestSessionHub(name string) (*session.Hub, *scriptedProcess) {

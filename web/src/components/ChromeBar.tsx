@@ -41,22 +41,22 @@ export function ChromeBar({
   onSignOutClick,
 }: ChromeBarProps) {
   return (
-    <div className="flex h-chrome shrink-0 items-center gap-3 border-b border-[var(--ditty-chrome-border)] bg-[var(--ditty-chrome-bg)] px-3 font-sans text-sm text-[#E4E7EC]">
+    <div className="flex h-chrome shrink-0 items-center gap-3 border-b border-[var(--ditty-chrome-border)] bg-[var(--ditty-chrome-bg)] px-3 font-sans text-sm text-[var(--ditty-chrome-fg)]">
       <span
         aria-hidden="true"
         className={`h-2 w-2 shrink-0 rounded-full ${DOT_CLASS[connectionState]}`}
       />
       <span className="shrink-0 font-semibold">{sessionName}</span>
-      <span className="hidden truncate font-mono text-xs text-muted-bright sm:inline">{title}</span>
+      <span className="hidden truncate font-mono text-xs text-[var(--ditty-chrome-muted)] sm:inline">{title}</span>
       <span className="flex-1" />
       <span
         className={`shrink-0 rounded border px-2 py-0.5 text-xs ${
-          writable ? "border-saffron text-saffron" : "border-line text-muted-bright"
+          writable ? "border-saffron text-saffron" : "border-[var(--ditty-chrome-border)] text-[var(--ditty-chrome-muted)]"
         }`}
       >
         {writable ? "you can type" : "read-only"}
       </span>
-      <span className="hidden shrink-0 font-mono text-xs text-muted-bright sm:inline">
+      <span className="hidden shrink-0 font-mono text-xs text-[var(--ditty-chrome-muted)] sm:inline">
         {clientCount} watching
       </span>
       {!settingsHidden && (
@@ -64,7 +64,7 @@ export function ChromeBar({
           type="button"
           aria-label="Settings"
           onClick={onSettingsClick}
-          className="shrink-0 rounded p-1.5 text-muted-bright hover:text-[#E4E7EC] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine"
+          className="shrink-0 rounded p-1.5 text-[var(--ditty-chrome-muted)] hover:text-[var(--ditty-chrome-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine"
         >
           <GearIcon />
         </button>
@@ -73,7 +73,7 @@ export function ChromeBar({
         type="button"
         aria-label="Share"
         onClick={onShareClick}
-        className="shrink-0 rounded p-1.5 text-muted-bright hover:text-[#E4E7EC] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine"
+        className="shrink-0 rounded p-1.5 text-[var(--ditty-chrome-muted)] hover:text-[var(--ditty-chrome-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine"
       >
         <ShareIcon />
       </button>
@@ -83,7 +83,7 @@ export function ChromeBar({
           aria-label="Sign out"
           title="Sign out"
           onClick={onSignOutClick}
-          className="shrink-0 rounded p-1.5 text-muted-bright hover:text-[#E4E7EC] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine"
+          className="shrink-0 rounded p-1.5 text-[var(--ditty-chrome-muted)] hover:text-[var(--ditty-chrome-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pine"
         >
           <SignOutIcon />
         </button>

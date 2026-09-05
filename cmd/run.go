@@ -32,6 +32,7 @@ import (
 	"github.com/0funct0ry/ditty/internal/pty"
 	"github.com/0funct0ry/ditty/internal/security"
 	"github.com/0funct0ry/ditty/internal/session"
+	"github.com/0funct0ry/ditty/internal/store"
 )
 
 // runCmd starts a Session and serves it over the web: it spawns the
@@ -121,6 +122,15 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 	}
 	defer func() { _ = closer.Close() }()
 
+	var authStore *store.Store
+	if secCfg.authDBPath != "" {
+		authStore, err = store.Open(secCfg.authDBPath)
+		if err != nil {
+			return fmt.Errorf("run: --auth-db: %w", err)
+		}
+		defer func() { _ = authStore.Close() }()
+	}
+
 	if len(args) == 0 {
 		return fmt.Errorf("run: no Command given; usage: %s", cmd.Use)
 	}
@@ -191,17 +201,25 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 			ExitOnDetach:    resolver.Bool("exit-on-detach"),
 			Profile:         profileJSON,
 			ProfileLock:     resolver.Bool("profile-lock"),
+			OnWriteDenied:   auditWriteDeniedFunc(authStore),
 		})
 		info = hub
+		auditRecord(authStore, "-", store.AuditStart)
 		// --header-env has no single request to resolve against in --shared
 		// mode (the one Command is already spawned above, before any Client
 		// connects), so it applies only in ditty's default per-Client mode
 		// below — consistent with every other per-Client Command knob
 		// (--uid, --cwd, ...) also being fixed for --shared's one Command.
-		hubFactory = func([]string) (httpapi.Hub, error) { return httpapi.NewSessionHub(hub, writable), nil }
-		if once {
-			go func() { <-hub.Done(); signalOnceDone() }()
+		hubFactory = func(_ []string, identity security.Identity) (httpapi.Hub, error) {
+			return httpapi.NewSessionHub(hub, writable && security.RoleAllowsWrite(identity.Role)), nil
 		}
+		go func() {
+			<-hub.Done()
+			auditRecord(authStore, "-", store.AuditExit)
+			if once {
+				signalOnceDone()
+			}
+		}()
 		shutdown = func() error { return gracefulShutdown(server, process, hub) }
 	} else {
 		// ditty's default: every Client gets its own fresh Command, spawned
@@ -213,7 +231,7 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 		info = staticInfo("ready")
 		sessions := newActiveSessions()
 		var used atomic.Bool
-		hubFactory = func(headerEnv []string) (httpapi.Hub, error) {
+		hubFactory = func(headerEnv []string, identity security.Identity) (httpapi.Hub, error) {
 			if once && !used.CompareAndSwap(false, true) {
 				return nil, errors.New("ditty: --once already served its one Client")
 			}
@@ -245,19 +263,22 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 				FlushInterval:   resolver.Duration("flush-interval"),
 				// Always tear down once this Client leaves: per-Client mode
 				// has no reconnect-to-the-same-Command semantics.
-				Once:        true,
-				Profile:     profileJSON,
-				ProfileLock: resolver.Bool("profile-lock"),
+				Once:          true,
+				Profile:       profileJSON,
+				ProfileLock:   resolver.Bool("profile-lock"),
+				OnWriteDenied: auditWriteDeniedFunc(authStore),
 			})
+			auditRecord(authStore, identity.Label, store.AuditStart)
 			sessions.add(connID, process)
 			go func() {
 				<-hub.Done()
+				auditRecord(authStore, identity.Label, store.AuditExit)
 				sessions.remove(connID)
 				if once {
 					signalOnceDone()
 				}
 			}()
-			return httpapi.NewSessionHub(hub, writable), nil
+			return httpapi.NewSessionHub(hub, writable && security.RoleAllowsWrite(identity.Role)), nil
 		}
 		shutdown = func() error {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -276,7 +297,7 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 	basePath := resolver.String("base-path")
 	addr := net.JoinHostPort(resolver.String("address"), strconv.Itoa(resolver.Int("port")))
 
-	grants, tokenGrant, err := buildGrants(secCfg, basePath, addr, logger)
+	grants, tokenGrant, jwtGrant, err := buildGrants(secCfg, basePath, addr, logger, authStore)
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
@@ -316,7 +337,10 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 		Profile:      profileJSON,
 		Grants:       grants,
 		TokenGrant:   tokenGrant,
+		JWTGrant:     jwtGrant,
 		HeaderEnv:    secCfg.headerEnvMappings,
+		OnAttach:     auditAttachFunc(authStore),
+		OnDetach:     auditDetachFunc(authStore),
 	})
 	if err != nil {
 		return fmt.Errorf("run: %w", err)

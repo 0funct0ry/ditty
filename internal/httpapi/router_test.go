@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,7 +10,21 @@ import (
 	"time"
 
 	"github.com/0funct0ry/ditty/internal/security"
+	"github.com/0funct0ry/ditty/web"
 )
+
+// realAssetName returns the filename of some real, embedded, hashed asset
+// under web/dist/assets — discovered at test time rather than hardcoded, so
+// this test survives web/dist being rebuilt (Vite's content hash in every
+// filename changes on every build).
+func realAssetName(t *testing.T) string {
+	t.Helper()
+	entries, err := fs.ReadDir(web.DistFS, "dist/assets")
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("read dist/assets: %v (entries=%d)", err, len(entries))
+	}
+	return entries[0].Name()
+}
 
 // fakeSessionInfo is a minimal SessionInfo double for router-level tests
 // that don't need a real Hub.
@@ -128,7 +143,7 @@ func TestRouter_EveryRoute(t *testing.T) {
 			})
 
 			t.Run("assets cache headers", func(t *testing.T) {
-				resp := get(t, server.URL+prefix+"/assets/index-D2rPhBFO.css")
+				resp := get(t, server.URL+prefix+"/assets/"+realAssetName(t))
 				defer func() { _ = resp.Body.Close() }()
 				if resp.StatusCode != http.StatusOK {
 					t.Fatalf("status = %d, want 200 for a real embedded asset", resp.StatusCode)
