@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,7 @@ import (
 	"github.com/0funct0ry/ditty/internal/logging"
 	"github.com/0funct0ry/ditty/internal/profile"
 	"github.com/0funct0ry/ditty/internal/pty"
+	"github.com/0funct0ry/ditty/internal/security"
 	"github.com/0funct0ry/ditty/internal/session"
 )
 
@@ -71,6 +73,7 @@ func registerRunFlags(fs *pflag.FlagSet) {
 	registerSessionFlags(fs)
 	registerCommandFlags(fs)
 	registerTransportFlags(fs)
+	registerSecurityFlags(fs)
 }
 
 // registerProfileFlags defines the SPEC.md §7 Profile-seeding flags (M6),
@@ -97,11 +100,21 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 		return fmt.Errorf("run: %w", err)
 	}
 
+	secCfg, secrets, err := resolveSecurityFlags(resolver)
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+	redactor := security.NewRedactor()
+	for _, s := range secrets {
+		redactor.Register(s)
+	}
+
 	logger, closer, err := logging.New(logging.Options{
-		Verbosity: resolver.Int("verbose"),
-		Quiet:     resolver.Bool("quiet"),
-		Format:    resolver.String("log-format"),
-		File:      resolver.String("log-file"),
+		Verbosity:   resolver.Int("verbose"),
+		Quiet:       resolver.Bool("quiet"),
+		Format:      resolver.String("log-format"),
+		File:        resolver.String("log-file"),
+		ReplaceAttr: redactor.ReplaceAttr,
 	})
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
@@ -180,7 +193,12 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 			ProfileLock:     resolver.Bool("profile-lock"),
 		})
 		info = hub
-		hubFactory = func() (httpapi.Hub, error) { return httpapi.NewSessionHub(hub, writable), nil }
+		// --header-env has no single request to resolve against in --shared
+		// mode (the one Command is already spawned above, before any Client
+		// connects), so it applies only in ditty's default per-Client mode
+		// below — consistent with every other per-Client Command knob
+		// (--uid, --cwd, ...) also being fixed for --shared's one Command.
+		hubFactory = func([]string) (httpapi.Hub, error) { return httpapi.NewSessionHub(hub, writable), nil }
 		if once {
 			go func() { <-hub.Done(); signalOnceDone() }()
 		}
@@ -195,7 +213,7 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 		info = staticInfo("ready")
 		sessions := newActiveSessions()
 		var used atomic.Bool
-		hubFactory = func() (httpapi.Hub, error) {
+		hubFactory = func(headerEnv []string) (httpapi.Hub, error) {
 			if once && !used.CompareAndSwap(false, true) {
 				return nil, errors.New("ditty: --once already served its one Client")
 			}
@@ -207,6 +225,7 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 			if err != nil {
 				return nil, err
 			}
+			command.Env = append(command.Env, headerEnv...)
 			process, err := pty.Spawn(ctx, command)
 			if err != nil {
 				return nil, fmt.Errorf("spawn Command: %w", err)
@@ -255,6 +274,33 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 	}
 
 	basePath := resolver.String("base-path")
+	addr := net.JoinHostPort(resolver.String("address"), strconv.Itoa(resolver.Int("port")))
+
+	grants, tokenGrant, err := buildGrants(secCfg, basePath, addr, logger)
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+
+	if err := security.BindGuard(addr, false, args[0], len(grants) > 0, secCfg.insecureNoAuth); err != nil {
+		cmd.SilenceErrors = true
+		cmd.PrintErrln(err.Error())
+		return errSilent
+	}
+	if secCfg.insecureNoAuth {
+		go warnInsecureNoAuth(ctx, logger)
+	}
+
+	var tlsConfig *tls.Config
+	if secCfg.tlsCert != "" || secCfg.tlsKey != "" {
+		if secCfg.tlsCert == "" || secCfg.tlsKey == "" {
+			return fmt.Errorf("run: --tls-cert and --tls-key must be given together")
+		}
+		tlsConfig, err = security.TLSConfig(secCfg.tlsCert, secCfg.tlsKey, secCfg.clientCA)
+		if err != nil {
+			return fmt.Errorf("run: %w", err)
+		}
+	}
+
 	handler, err := httpapi.NewRouter(httpapi.Options{
 		BasePath:     basePath,
 		HubFactory:   hubFactory,
@@ -268,13 +314,20 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 		Server:       buildinfo.Version,
 		Writable:     writable,
 		Profile:      profileJSON,
+		Grants:       grants,
+		TokenGrant:   tokenGrant,
+		HeaderEnv:    secCfg.headerEnvMappings,
 	})
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
 
-	addr := net.JoinHostPort(resolver.String("address"), strconv.Itoa(resolver.Int("port")))
-	ln, err := net.Listen("tcp", addr)
+	var ln net.Listener
+	if tlsConfig != nil {
+		ln, err = tls.Listen("tcp", addr, tlsConfig)
+	} else {
+		ln, err = net.Listen("tcp", addr)
+	}
 	if err != nil {
 		return fmt.Errorf("run: listen on %s: %w", addr, err)
 	}
@@ -286,9 +339,22 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 	if !strings.HasSuffix(normalizedBasePath, "/") {
 		normalizedBasePath += "/"
 	}
-	url := fmt.Sprintf("http://%s%s", ln.Addr().String(), normalizedBasePath)
+	scheme := "http"
+	if tlsConfig != nil {
+		scheme = "https"
+	}
+	url := fmt.Sprintf("%s://%s%s", scheme, ln.Addr().String(), normalizedBasePath)
 	logger.Info("ditty starting", "version", buildinfo.Version, "url", url)
-	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "ditty  %s\n  url  %s\n", buildinfo.Version, url)
+	if tokenGrant != nil {
+		// SPEC.md §4.1's startup banner: print the complete shareable URL,
+		// token included, so zero-config stays zero-config (§6.1 I3).
+		shareURL := fmt.Sprintf("%s://%s%st/%s", scheme, ln.Addr().String(), normalizedBasePath, tokenGrant.Token())
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "ditty  %s\nsession   %s (%s)\nurl       %s\naccess    %s\n",
+			buildinfo.Version, sessionID, args[0], shareURL, accessSummary(writable))
+		url = shareURL
+	} else {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "ditty  %s\n  url  %s\n", buildinfo.Version, url)
+	}
 
 	if resolver.Bool("open") {
 		if err := browser.Open(url); err != nil {

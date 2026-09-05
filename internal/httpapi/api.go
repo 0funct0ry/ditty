@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/0funct0ry/ditty/internal/security"
 )
 
 // healthzHandler answers SPEC.md §4's /healthz: never Grant-gated, and
@@ -45,16 +47,29 @@ func profileHandler(profile []byte) gin.HandlerFunc {
 	}
 }
 
-// logoutHandler answers POST /api/logout. There is no Grant/cookie
-// machinery yet (M11), so this is a no-op that always succeeds.
-func logoutHandler(c *gin.Context) {
-	c.Status(http.StatusNoContent)
+// logoutHandler answers POST /api/logout: it clears the SPEC.md §4.1 grant
+// cookie, when a TokenGrant is configured. Other Grant types (basic, mTLS,
+// trust-header) carry no server-side session to clear, so this is a no-op
+// for them.
+func logoutHandler(tokenGrant *security.TokenGrant) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if tokenGrant != nil {
+			c.SetCookie(security.CookieName, "", -1, "", "", false, true)
+		}
+		c.Status(http.StatusNoContent)
+	}
 }
 
-// tokenExchangeHandler answers GET /t/:token. Full token-to-cookie exchange
-// is a Grant behaviour (SPEC.md §4.1) that arrives with internal/security
-// in M11; until then the route exists (so its absence is never the reason
-// a client fails) but is not implemented.
-func tokenExchangeHandler(c *gin.Context) {
-	c.Status(http.StatusNotImplemented)
+// tokenExchangeHandler answers GET /t/:token (SPEC.md §4.1): a valid token
+// is exchanged, once, for the opaque grant cookie, then redirects to the
+// base path; anything else — no TokenGrant configured, or a bad token — is
+// a 404, revealing nothing about which case applies.
+func tokenExchangeHandler(tokenGrant *security.TokenGrant, redirectTo string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if tokenGrant == nil || !tokenGrant.Exchange(c.Writer, c.Param("token")) {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Redirect(http.StatusFound, redirectTo)
+	}
 }

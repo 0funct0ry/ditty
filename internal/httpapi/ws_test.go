@@ -96,7 +96,7 @@ func (p *scriptedProcess) Wait() (pty.ExitStatus, error) {
 // staticHub is a HubFactory that always returns the same Hub, matching
 // --shared mode — the shape most of this file's tests exercise.
 func staticHub(hub Hub) HubFactory {
-	return func() (Hub, error) { return hub, nil }
+	return func([]string) (Hub, error) { return hub, nil }
 }
 
 func newTestSessionHub(name string) (*session.Hub, *scriptedProcess) {

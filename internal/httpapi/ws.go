@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"github.com/0funct0ry/ditty/internal/security"
 	"github.com/0funct0ry/ditty/internal/wire"
 )
 
@@ -53,10 +54,14 @@ type Hub interface {
 // connection, so one Client's Command exiting never affects any other
 // Client (SPEC.md §1's Session is scoped to one Client's connection, not to
 // the whole `ditty run` invocation, in this mode). An error rejects the
-// upgrade — e.g. --once refusing a second connection ever.
-type HubFactory func() (Hub, error)
+// upgrade — e.g. --once refusing a second connection ever. headerEnv is
+// this connection's resolved --header-env additions (SPEC.md §6.4), already
+// filtered and truncated by security.Resolve against the live request —
+// HubFactory itself never sees the *http.Request, keeping internal/security
+// as the only place that touches raw header values.
+type HubFactory func(headerEnv []string) (Hub, error)
 
-// WSOptions configures NewWSHandler's origin check and keepalive.
+// WSOptions configures NewWSHandler's origin check, keepalive and auth.
 type WSOptions struct {
 	// OriginAllow overrides the default same-host Origin check (SPEC.md
 	// §6.3, --origin-allow): when set, an upgrade is admitted only if the
@@ -67,6 +72,15 @@ type WSOptions struct {
 	// attached Client (SPEC.md §5.5, --ping-interval). Zero uses
 	// DefaultPingInterval.
 	PingInterval time.Duration
+	// Grants gates every upgrade (SPEC.md §6.2): empty means no Grant is
+	// configured (only reachable when the bind guard has separately
+	// permitted no-auth), so every upgrade is admitted with an empty
+	// Identity. Non-empty requires Authenticate to succeed before the
+	// upgrade proceeds.
+	Grants security.Grants
+	// HeaderEnv is the set of --header-env mappings (SPEC.md §6.4) resolved
+	// against each upgrade's request headers and handed to HubFactory.
+	HeaderEnv []security.HeaderEnvMapping
 }
 
 // checkOrigin implements SPEC.md §6.3: no Origin header (a non-browser
@@ -109,6 +123,17 @@ func NewWSHandler(newHub HubFactory, opts WSOptions) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var identity security.Identity
+		if len(opts.Grants) > 0 {
+			id, ok := opts.Grants.Authenticate(r)
+			if !ok {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			identity = id
+		}
+		headerEnv := security.Resolve(opts.HeaderEnv, r)
+
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
@@ -124,9 +149,13 @@ func NewWSHandler(newHub HubFactory, opts WSOptions) http.Handler {
 			_ = conn.Close()
 			return
 		}
-		client := &wsClient{id: id, label: "Client " + id[:6], conn: conn}
+		label := "Client " + id[:6]
+		if identity.Label != "" {
+			label = identity.Label
+		}
+		client := &wsClient{id: id, label: label, conn: conn}
 
-		hub, err := newHub()
+		hub, err := newHub(headerEnv)
 		if err != nil {
 			closeConn(conn, websocket.CloseTryAgainLater, err.Error())
 			return

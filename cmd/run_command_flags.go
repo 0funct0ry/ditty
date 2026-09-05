@@ -7,8 +7,8 @@ import "github.com/spf13/pflag"
 // that shape a Command's spawn/close behaviour. internal/session's own
 // ring/output-pump/write-capability flags are registered separately by
 // registerSessionFlags (M9); security-only flags (--allow-url-args,
-// --arg-pattern, --header-env) are still deferred to M11. Newly claimed
-// short letters: d E T U G N i y z Z x W g X K.
+// --arg-pattern, --header-env) are registered by registerSecurityFlags
+// (M11). Newly claimed short letters: d E T U G N i y z Z x W g X K.
 func registerCommandFlags(fs *pflag.FlagSet) {
 	fs.StringP("cwd", "d", "", "working directory for the Command (default: ditty's own cwd)")
 	fs.StringArrayP("env", "E", nil, "additional KEY=VAL environment variable for the Command (repeatable)")

@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/0funct0ry/ditty/internal/security"
 )
 
 // fakeSessionInfo is a minimal SessionInfo double for router-level tests
@@ -108,11 +111,11 @@ func TestRouter_EveryRoute(t *testing.T) {
 				}
 			})
 
-			t.Run("token exchange stub", func(t *testing.T) {
+			t.Run("token exchange with no TokenGrant configured", func(t *testing.T) {
 				resp := get(t, server.URL+prefix+"/t/sometoken")
 				defer func() { _ = resp.Body.Close() }()
-				if resp.StatusCode != http.StatusNotImplemented {
-					t.Fatalf("status = %d, want 501", resp.StatusCode)
+				if resp.StatusCode != http.StatusNotFound {
+					t.Fatalf("status = %d, want 404", resp.StatusCode)
 				}
 			})
 
@@ -181,6 +184,76 @@ func TestRouter_FrameAncestors(t *testing.T) {
 				t.Fatalf("CSP = %q, want it to contain %q", csp, tc.want)
 			}
 		})
+	}
+}
+
+func TestRouter_GrantGatesProtectedRoutes(t *testing.T) {
+	token, err := security.GenerateToken(security.DefaultTokenLength)
+	if err != nil {
+		t.Fatalf("GenerateToken: %v", err)
+	}
+	tokenGrant := security.NewTokenGrant(token, "/", false, time.Hour)
+
+	handler, err := NewRouter(Options{
+		Info:       fakeSessionInfo{state: "live"},
+		Grants:     security.Grants{tokenGrant},
+		TokenGrant: tokenGrant,
+	})
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	// healthz stays open even with a Grant configured.
+	resp := get(t, server.URL+"/healthz")
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("healthz status = %d, want 200", resp.StatusCode)
+	}
+
+	// A protected route with no cookie is rejected.
+	unauth := get(t, server.URL+"/api/session")
+	defer func() { _ = unauth.Body.Close() }()
+	if unauth.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("api/session with no Grant status = %d, want 401", unauth.StatusCode)
+	}
+
+	// The bad-token exchange 404s and sets no cookie.
+	badExchange := get(t, server.URL+"/t/not-the-token")
+	defer func() { _ = badExchange.Body.Close() }()
+	if badExchange.StatusCode != http.StatusNotFound {
+		t.Fatalf("bad token exchange status = %d, want 404", badExchange.StatusCode)
+	}
+
+	// The real token exchange sets the cookie and redirects, and the
+	// cookie then admits the protected route.
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	exchangeResp, err := client.Get(server.URL + "/t/" + token)
+	if err != nil {
+		t.Fatalf("GET token exchange: %v", err)
+	}
+	defer func() { _ = exchangeResp.Body.Close() }()
+	if exchangeResp.StatusCode != http.StatusFound {
+		t.Fatalf("token exchange status = %d, want 302", exchangeResp.StatusCode)
+	}
+	cookies := exchangeResp.Cookies()
+	if len(cookies) != 1 || cookies[0].Name != security.CookieName {
+		t.Fatalf("token exchange cookies = %+v", cookies)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/api/session", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	req.AddCookie(cookies[0])
+	authed, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET with cookie: %v", err)
+	}
+	defer func() { _ = authed.Body.Close() }()
+	if authed.StatusCode != http.StatusOK {
+		t.Fatalf("api/session with valid cookie status = %d, want 200", authed.StatusCode)
 	}
 }
 

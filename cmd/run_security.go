@@ -1,0 +1,186 @@
+package cmd
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/0funct0ry/ditty/internal/config"
+	"github.com/0funct0ry/ditty/internal/security"
+)
+
+// errSilent is returned by execRun when it has already printed the relevant
+// message itself (the bind guard's exact SPEC.md §6.1 wording) and cobra
+// must not additionally print its own "Error: ..." line.
+var errSilent = errors.New("ditty: exiting")
+
+// insecureNoAuthWarnInterval is how often the --insecure-no-auth reminder
+// repeats for the life of the process (SPEC.md §6.1 I2).
+const insecureNoAuthWarnInterval = 60 * time.Second
+
+// warnInsecureNoAuth logs the --insecure-no-auth reminder every
+// insecureNoAuthWarnInterval until ctx is done.
+func warnInsecureNoAuth(ctx context.Context, logger *slog.Logger) {
+	ticker := time.NewTicker(insecureNoAuthWarnInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			logger.Warn("running with --insecure-no-auth: this Session has no Grant and is not protected")
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// accessSummary renders SPEC.md §4.1's startup-banner access line.
+func accessSummary(writable bool) string {
+	if writable {
+		return "writable · token"
+	}
+	return "read-only · token"
+}
+
+// defaultTokenCookieTTL is the grant cookie's Max-Age (SPEC.md §4.1) until a
+// dedicated --token-ttl flag exists (a link TTL is deferred to v1.1 M17 per
+// SPEC.md §6.6's residual-risk table).
+const defaultTokenCookieTTL = 24 * time.Hour
+
+// securityConfig is every SPEC.md §6 flag resolved and validated, but not
+// yet turned into Grant objects — resolveSecurityFlags does no I/O and
+// never logs, so it can run before the logger (which needs its secrets
+// registered first) is built.
+type securityConfig struct {
+	tokenEnabled bool
+	token        string // "" when tokenEnabled but generated randomly below
+	tokenLength  int
+
+	basicAuth             string // "user:pass", "" if unset
+	insecureBasicOverHTTP bool
+
+	tlsCert, tlsKey, clientCA string
+
+	trustHeader string
+	trustProxy  []string
+
+	insecureNoAuth bool
+
+	allowURLArgs bool
+	argPattern   string
+
+	headerEnvMappings []security.HeaderEnvMapping
+}
+
+// resolveSecurityFlags parses and validates every §6 flag, generating the
+// URL token now (SPEC.md §6.1 I3: on by default unless --no-token) since
+// doing so needs no I/O beyond crypto/rand. It returns the resolved config
+// alongside every secret value that must be registered with a
+// security.Redactor before any logging happens.
+func resolveSecurityFlags(resolver *config.Resolver) (securityConfig, []string, error) {
+	var cfg securityConfig
+	var secrets []string
+
+	cfg.insecureBasicOverHTTP = resolver.Bool("insecure-basic-over-http")
+	cfg.tlsCert = resolver.String("tls-cert")
+	cfg.tlsKey = resolver.String("tls-key")
+	cfg.clientCA = resolver.String("client-ca")
+	cfg.trustHeader = resolver.String("trust-header")
+	cfg.trustProxy = resolver.StringSlice("trust-proxy")
+	cfg.insecureNoAuth = resolver.Bool("insecure-no-auth")
+	cfg.allowURLArgs = resolver.Bool("allow-url-args")
+	cfg.argPattern = resolver.String("arg-pattern")
+
+	cfg.tokenEnabled = !resolver.Bool("no-token")
+	if cfg.tokenEnabled {
+		cfg.tokenLength = resolver.Int("token-length")
+		literal := resolver.String("token")
+		if literal == "-" { // bare --token (NoOptDefVal): generate one
+			literal = ""
+		}
+		if literal == "" {
+			generated, err := security.GenerateToken(cfg.tokenLength)
+			if err != nil {
+				return cfg, nil, fmt.Errorf("--token: %w", err)
+			}
+			literal = generated
+		}
+		cfg.token = literal
+		secrets = append(secrets, cfg.token)
+	}
+
+	if basicAuth := resolver.String("basic-auth"); basicAuth != "" {
+		user, pass, ok := strings.Cut(basicAuth, ":")
+		if !ok || user == "" {
+			return cfg, nil, fmt.Errorf("--basic-auth must be user:pass, got %q", basicAuth)
+		}
+		cfg.basicAuth = basicAuth
+		secrets = append(secrets, pass)
+	}
+
+	for _, spec := range resolver.StringSlice("header-env") {
+		m, err := security.ParseHeaderEnvMapping(spec)
+		if err != nil {
+			return cfg, nil, err
+		}
+		cfg.headerEnvMappings = append(cfg.headerEnvMappings, m)
+	}
+
+	// Validate --arg-pattern eagerly so a bad regex fails at startup, not
+	// on the first request.
+	if _, err := security.NewURLArgFilter(cfg.allowURLArgs, cfg.argPattern); err != nil {
+		return cfg, nil, err
+	}
+
+	return cfg, secrets, nil
+}
+
+// buildGrants turns a resolved securityConfig into the active Grant set
+// (SPEC.md §6.2: any one admits), the TokenGrant (nil when tokens are
+// disabled, kept separate from Grants because /t/:token and /api/logout
+// need its Exchange method specifically), and the *tls.Config a TLS
+// listener needs (nil when neither --tls-cert nor --tls-key is set).
+// address is the address ditty is about to bind, used only to decide
+// whether --basic-auth over plaintext is refused (SPEC.md §6.2).
+func buildGrants(cfg securityConfig, basePath, address string, logger *slog.Logger) (security.Grants, *security.TokenGrant, error) {
+	var grants security.Grants
+	var tokenGrant *security.TokenGrant
+
+	if cfg.tokenEnabled {
+		tokenGrant = security.NewTokenGrant(cfg.token, basePath, cfg.tlsCert != "", defaultTokenCookieTTL)
+		grants = append(grants, tokenGrant)
+	}
+
+	if cfg.basicAuth != "" {
+		if cfg.tlsCert == "" && !cfg.insecureBasicOverHTTP && !security.IsLoopbackAddr(address) {
+			return nil, nil, fmt.Errorf(
+				"--basic-auth over plaintext on a non-loopback address requires --insecure-basic-over-http (SPEC.md §6.2)")
+		}
+		basicGrant, err := security.NewBasicGrant(cfg.basicAuth)
+		if err != nil {
+			return nil, nil, err
+		}
+		grants = append(grants, basicGrant)
+	}
+
+	if cfg.clientCA != "" {
+		grants = append(grants, security.NewMTLSGrant())
+	}
+
+	if cfg.trustHeader != "" {
+		if len(cfg.trustProxy) == 0 {
+			logger.Warn("--trust-header set without --trust-proxy; the header will never be honoured",
+				"header", cfg.trustHeader)
+		} else {
+			thGrant, err := security.NewTrustedHeaderGrant(cfg.trustHeader, cfg.trustProxy)
+			if err != nil {
+				return nil, nil, err
+			}
+			grants = append(grants, thGrant)
+		}
+	}
+
+	return grants, tokenGrant, nil
+}

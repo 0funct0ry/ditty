@@ -18,6 +18,12 @@ type Options struct {
 	Quiet     bool
 	Format    string
 	File      string
+	// ReplaceAttr, when non-nil, is installed as the slog.HandlerOptions
+	// hook of the same name — internal/security's Redactor uses this to
+	// scrub secret values out of every log record (CLAUDE.md: never log
+	// token values, basic-auth credentials, PTY content, or header-env
+	// values).
+	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
 }
 
 // New builds a slog.Logger per Options and returns it along with the
@@ -43,7 +49,7 @@ func New(opts Options) (*slog.Logger, io.Closer, error) {
 		closer = f
 	}
 
-	handlerOpts := &slog.HandlerOptions{Level: level}
+	handlerOpts := &slog.HandlerOptions{Level: level, ReplaceAttr: opts.ReplaceAttr}
 	var handler slog.Handler
 	switch opts.Format {
 	case "", "text":

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/0funct0ry/ditty/internal/security"
 )
 
 // SessionInfo is the read-only view of a Session's Hub that /api/session
@@ -49,6 +51,18 @@ type Options struct {
 	Writable bool
 	// Profile seeds /api/profile's JSON body (SPEC.md §7).
 	Profile []byte
+
+	// Grants gates every route except /healthz and /t/:token (SPEC.md §6.2).
+	// Empty means no Grant is configured (only reachable when the bind
+	// guard has separately permitted no-auth), so every request is
+	// admitted.
+	Grants security.Grants
+	// TokenGrant, when non-nil, backs /t/:token's path-to-cookie exchange
+	// (SPEC.md §4.1) and /api/logout's cookie clearing.
+	TokenGrant *security.TokenGrant
+	// HeaderEnv is the set of --header-env mappings (SPEC.md §6.4) resolved
+	// against each WebSocket upgrade's request headers.
+	HeaderEnv []security.HeaderEnvMapping
 }
 
 // NewRouter builds the full SPEC.md §4 route table under opts.BasePath.
@@ -66,24 +80,53 @@ func NewRouter(opts Options) (http.Handler, error) {
 	engine.Use(securityHeaders(opts.AllowIframe))
 
 	group := engine.Group(basePath)
+	// /healthz and /t/:token are never Grant-gated: healthz is an
+	// unauthenticated liveness probe, and the token exchange is itself how
+	// a Client obtains a Grant in the first place.
 	group.GET("/healthz", healthzHandler(opts.Info))
-	group.GET("/", indexHandler(index))
-	group.GET("/favicon.ico", faviconHandler)
-	group.GET("/assets/*filepath", assetsHandler(basePath))
-	group.GET("/t/:token", tokenExchangeHandler)
-	group.GET("/api/session", sessionHandler(opts))
-	group.GET("/api/profile", profileHandler(opts.Profile))
-	group.POST("/api/logout", logoutHandler)
+	rootPath := basePath
+	if rootPath == "" {
+		rootPath = "/"
+	}
+	group.GET("/t/:token", tokenExchangeHandler(opts.TokenGrant, rootPath))
+
+	protected := group.Group("")
+	protected.Use(grantMiddleware(opts.Grants))
+	protected.GET("/", indexHandler(index))
+	protected.GET("/favicon.ico", faviconHandler)
+	protected.GET("/assets/*filepath", assetsHandler(basePath))
+	protected.GET("/api/session", sessionHandler(opts))
+	protected.GET("/api/profile", profileHandler(opts.Profile))
+	protected.POST("/api/logout", logoutHandler(opts.TokenGrant))
 
 	if opts.HubFactory != nil {
 		wsHandler := NewWSHandler(opts.HubFactory, WSOptions{
 			OriginAllow:  opts.OriginAllow,
 			PingInterval: opts.PingInterval,
+			Grants:       opts.Grants,
+			HeaderEnv:    opts.HeaderEnv,
 		})
-		group.GET("/ws", gin.WrapH(wsHandler))
+		protected.GET("/ws", gin.WrapH(wsHandler))
 	}
 
 	return engine, nil
+}
+
+// grantMiddleware admits every request when no Grant is configured (the
+// bind guard is what keeps that safe — SPEC.md §6.1 I2), and otherwise
+// requires one of opts.Grants to authenticate the request.
+func grantMiddleware(grants security.Grants) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if len(grants) == 0 {
+			c.Next()
+			return
+		}
+		if _, ok := grants.Authenticate(c.Request); !ok {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		c.Next()
+	}
 }
 
 // securityHeaders sets SPEC.md §4's headers on every response: nosniff,
