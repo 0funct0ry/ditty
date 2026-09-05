@@ -1,9 +1,9 @@
 // Package httpapi is the app shell: it answers /healthz, serves the
 // embedded UI under --base-path, and (since M3) can mount a minimal /ws
-// upgrade handler in front of a Hub such as internal/fixture. The full
-// route table from SPEC.md §4 — security headers, CSP, /t/:token, /api/*
-// — and the switch to Gin both arrive in M10; this is deliberately just
-// enough transport for a browser to reach a Hub (SPEC.md §12 M1, M3).
+// upgrade handler in front of a Hub, such as internal/session's (M9). The
+// full route table from SPEC.md §4 — security headers, CSP, /t/:token,
+// /api/* — and the switch to Gin both arrive in M10; this is deliberately
+// just enough transport for a browser to reach a Hub (SPEC.md §12 M1, M3).
 package httpapi
 
 import (

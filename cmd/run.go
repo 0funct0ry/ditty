@@ -22,12 +22,12 @@ import (
 	"github.com/0funct0ry/ditty/internal/logging"
 )
 
-// runCmd starts a Session and serves it over the web. internal/pty (M8) can
-// spawn a Command, but nothing wires it into a running Session yet — that
-// is internal/session's job (M9). Until then this stands up the HTTP shell
-// — /healthz and the embedded UI — plus, in a dev build with the "fixture"
-// build tag, a /ws endpoint backed by a scripted internal/fixture Hub (M3).
-// Command argv after `--` is accepted but not yet run.
+// runCmd starts a Session and serves it over the web. internal/pty (M8)
+// can spawn a Command and internal/session (M9) can drive a real Hub from
+// it, but wiring either into a live HTTP/WebSocket transport is internal/
+// httpapi's job (M10) — until then this stands up the HTTP shell only:
+// /healthz and the embedded UI. Command argv after `--` is accepted but
+// not yet run.
 var runCmd = &cobra.Command{
 	Use:   "run [flags] -- <command> [args...]",
 	Short: "Start a Session and share it over the web",
@@ -47,9 +47,9 @@ func init() {
 // no persistent flags), so `ditty run -w bash` and the bare `ditty -w bash`
 // shortcut (§8.2) parse an identical flag surface without either command
 // inheriting the other's flags implicitly. Short letters claimed here:
-// p a b o v q f L t F s c k R C e l d E T U G N i y z Z x W g X K (see
-// SPEC.md §8.1). Note shorthands are case-sensitive single runes, so e.g.
-// "t" (profile-theme) and "T" (term) are distinct and do not collide.
+// p a b o v q f L t F s c k R C e l d E T U G N i y z Z x W g X K S u m M w
+// (see SPEC.md §8.1). Note shorthands are case-sensitive single runes, so
+// e.g. "t" (profile-theme) and "T" (term) are distinct and do not collide.
 func registerRunFlags(fs *pflag.FlagSet) {
 	fs.IntP("port", "p", 7654, "port to listen on (0 = random, printed at startup)")
 	fs.StringP("address", "a", "127.0.0.1", "address to bind")
@@ -60,7 +60,7 @@ func registerRunFlags(fs *pflag.FlagSet) {
 	fs.StringP("log-format", "f", "text", "log output format: text or json")
 	fs.StringP("log-file", "L", "", "write logs to this file instead of stderr")
 	registerProfileFlags(fs)
-	registerFixtureFlags(fs)
+	registerSessionFlags(fs)
 	registerCommandFlags(fs)
 }
 
@@ -104,13 +104,10 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 		logger.Debug("Command argv accepted but not yet run — Session/Hub wiring arrives in M9", "argv", args)
 	}
 
-	wsHandler, err := fixtureWSHandler(resolver)
-	if err != nil {
-		return fmt.Errorf("run: %w", err)
-	}
-
 	basePath := resolver.String("base-path")
-	handler, err := httpapi.NewHandler(basePath, wsHandler)
+	// ws stays nil until internal/httpapi's real transport (M10) drives an
+	// internal/session Hub; internal/session itself already exists (M9).
+	handler, err := httpapi.NewHandler(basePath, nil)
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}

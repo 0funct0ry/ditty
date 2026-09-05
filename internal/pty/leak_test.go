@@ -3,6 +3,7 @@
 package pty
 
 import (
+	"bufio"
 	"context"
 	"os"
 	"runtime"
@@ -39,6 +40,13 @@ func TestSpawnCloseLeakFree(t *testing.T) {
 		if err != nil {
 			t.Fatalf("cycle %d: Spawn: %v", i, err)
 		}
+		// Drain the PTY's output before Wait: on darwin/BSD, a child's
+		// unread output left sitting in the PTY buffer measurably delays
+		// the kernel reaping it (~600ms observed here vs <1ms drained),
+		// which does not reflect a real ditty Session — the real output
+		// pump always drains continuously — only this test's own
+		// read-nothing pattern.
+		bufio.NewScanner(p).Scan()
 		if _, err := waitTimeout(t, p); err != nil {
 			t.Fatalf("cycle %d: Wait: %v", i, err)
 		}

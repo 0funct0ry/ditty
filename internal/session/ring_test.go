@@ -1,4 +1,4 @@
-package fixture
+package session
 
 import (
 	"bytes"

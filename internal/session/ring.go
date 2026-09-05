@@ -1,17 +1,18 @@
-package fixture
+package session
 
 import "sync"
 
-// scrollbackBytes is the fixture's ring capacity, matching the real Hub's
-// default --scrollback-bytes (SPEC.md §3.2).
-const scrollbackBytes = 256 * 1024
+// DefaultScrollbackBytes is the ring's default capacity (SPEC.md §3.2),
+// used when --scrollback-bytes is left at its default.
+const DefaultScrollbackBytes = 256 * 1024
 
 // resetSequence is prepended to every replay so a truncated frame can't
 // leave a Client's emulator in a corrupt state (SPEC.md §3.2).
 const resetSequence = "\x1b[2J\x1b[H"
 
 // ring is a byte-oriented ring buffer that never splits a UTF-8 rune or an
-// escape sequence at the head it hands out on replay (SPEC.md §3.2).
+// escape sequence at the head it hands out on replay (SPEC.md §3.2). A
+// capacity of 0 (--scrollback-bytes 0) retains nothing.
 type ring struct {
 	mu   sync.Mutex
 	data []byte

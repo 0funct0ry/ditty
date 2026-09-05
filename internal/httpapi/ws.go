@@ -20,13 +20,12 @@ const writeDeadline = 5 * time.Second
 // implementation NewWSHandler constructs for every upgrade.
 //
 // This is deliberately httpapi's own type rather than a re-export of
-// internal/fixture's identically-shaped Client interface: httpapi must not
-// import internal/fixture, or every build — including a release build
-// without the "fixture" tag — would link it. The caller wiring a Hub
-// implementation (cmd/run_fixture.go today, internal/session's transport
-// wiring in M10) bridges the two structurally-identical interfaces with a
-// small adapter; Go permits assigning between interface types whose method
-// sets match without either package importing the other.
+// internal/session's identically-shaped (plus Writable) Client interface:
+// httpapi must not import internal/session until the real transport wiring
+// lands in M10. The caller wiring a Hub implementation bridges the two
+// structurally-identical interfaces with a small adapter; Go permits
+// assigning between interface types whose method sets match without
+// either package importing the other.
 type Client interface {
 	ID() string
 	Label() string
@@ -35,10 +34,10 @@ type Client interface {
 }
 
 // Hub is what NewWSHandler drives: attach/detach a Client, and route
-// decoded Input/Resize frames to it. internal/fixture's Hub satisfies this
-// shape today (via an adapter — see Client's doc comment); internal/
-// session's real Hub (M9/M10) will too, so swapping one for the other only
-// touches wiring, never this handler.
+// decoded Input/Resize frames to it. internal/session's real Hub (M9) adds
+// a Writable() method to its own Client interface that this shape doesn't
+// have yet; M10's transport wiring bridges the two, so swapping one Hub
+// implementation for another only touches wiring, never this handler.
 type Hub interface {
 	Attach(c Client) error
 	Detach(id string)
@@ -130,8 +129,9 @@ func randomID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// wsClient implements fixture.Client (and, later, whatever internal/session
-// needs from a transport Client) over a single WebSocket connection.
+// wsClient implements httpapi.Client (and, once M10 wires the real
+// transport, whatever internal/session's own Client needs beyond that)
+// over a single WebSocket connection.
 type wsClient struct {
 	id    string
 	label string
