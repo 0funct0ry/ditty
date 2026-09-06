@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io/fs"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -234,6 +235,122 @@ func TestAuthDBGuard_NoFileWithoutFlag(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("WalkDir: %v", err)
+	}
+}
+
+func TestReadSecretFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret")
+	if err := os.WriteFile(path, []byte("s3cret\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got, err := readSecretFile(path)
+	if err != nil {
+		t.Fatalf("readSecretFile: %v", err)
+	}
+	if got != "s3cret" {
+		t.Fatalf("readSecretFile = %q, want %q (trailing newline trimmed)", got, "s3cret")
+	}
+
+	if _, err := readSecretFile(filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("readSecretFile(missing file) = nil error, want error")
+	}
+}
+
+func TestResolveSecurityFlags_BasicAuthFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "basic-auth")
+	if err := os.WriteFile(path, []byte("alice:s3cret\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	t.Setenv(basicAuthFileEnv, path)
+
+	resolver := newSecurityResolver(t, []string{"--no-token"})
+	cfg, secrets, err := resolveSecurityFlags(resolver)
+	if err != nil {
+		t.Fatalf("resolveSecurityFlags: %v", err)
+	}
+	if cfg.basicAuth != "alice:s3cret" {
+		t.Fatalf("basicAuth = %q, want alice:s3cret (from %s)", cfg.basicAuth, basicAuthFileEnv)
+	}
+	if len(secrets) != 1 || secrets[0] != "s3cret" {
+		t.Fatalf("secrets = %v, want [s3cret]", secrets)
+	}
+}
+
+func TestResolveSecurityFlags_BasicAuthFlagWinsOverFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "basic-auth")
+	if err := os.WriteFile(path, []byte("fromfile:pw\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	t.Setenv(basicAuthFileEnv, path)
+
+	resolver := newSecurityResolver(t, []string{"--basic-auth=alice:s3cret", "--no-token"})
+	cfg, _, err := resolveSecurityFlags(resolver)
+	if err != nil {
+		t.Fatalf("resolveSecurityFlags: %v", err)
+	}
+	if cfg.basicAuth != "alice:s3cret" {
+		t.Fatalf("basicAuth = %q, want the flag value to win over %s", cfg.basicAuth, basicAuthFileEnv)
+	}
+}
+
+func TestResolveSecurityFlags_BasicAuthFileMissing(t *testing.T) {
+	t.Setenv(basicAuthFileEnv, filepath.Join(t.TempDir(), "does-not-exist"))
+	resolver := newSecurityResolver(t, []string{"--no-token"})
+	if _, _, err := resolveSecurityFlags(resolver); err == nil {
+		t.Fatal("resolveSecurityFlags(missing basic-auth file) = nil error, want error")
+	}
+}
+
+func TestResolveSecurityFlags_JWTSecretFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "jwt-secret")
+	if err := os.WriteFile(path, []byte("supersecretvalue\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	t.Setenv(jwtSecretFileEnv, path)
+
+	resolver := newSecurityResolver(t, []string{"--no-token", "--auth-db=" + filepath.Join(dir, "auth.db")})
+	cfg, secrets, err := resolveSecurityFlags(resolver)
+	if err != nil {
+		t.Fatalf("resolveSecurityFlags: %v", err)
+	}
+	if cfg.jwtSecret != "supersecretvalue" {
+		t.Fatalf("jwtSecret = %q, want supersecretvalue (from %s)", cfg.jwtSecret, jwtSecretFileEnv)
+	}
+	if len(secrets) != 1 || secrets[0] != "supersecretvalue" {
+		t.Fatalf("secrets = %v, want [supersecretvalue]", secrets)
+	}
+}
+
+func TestResolveSecurityFlags_JWTSecretFlagWinsOverFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "jwt-secret")
+	if err := os.WriteFile(path, []byte("fromfile"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	t.Setenv(jwtSecretFileEnv, path)
+
+	resolver := newSecurityResolver(t, []string{
+		"--no-token", "--auth-db=" + filepath.Join(dir, "auth.db"), "--jwt-secret=explicitsecret",
+	})
+	cfg, _, err := resolveSecurityFlags(resolver)
+	if err != nil {
+		t.Fatalf("resolveSecurityFlags: %v", err)
+	}
+	if cfg.jwtSecret != "explicitsecret" {
+		t.Fatalf("jwtSecret = %q, want the flag value to win over %s", cfg.jwtSecret, jwtSecretFileEnv)
+	}
+}
+
+func TestResolveSecurityFlags_JWTSecretFileMissing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(jwtSecretFileEnv, filepath.Join(dir, "does-not-exist"))
+	resolver := newSecurityResolver(t, []string{"--no-token", "--auth-db=" + filepath.Join(dir, "auth.db")})
+	if _, _, err := resolveSecurityFlags(resolver); err == nil {
+		t.Fatal("resolveSecurityFlags(missing jwt-secret file) = nil error, want error")
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -14,6 +15,28 @@ import (
 	"github.com/0funct0ry/ditty/internal/security"
 	"github.com/0funct0ry/ditty/internal/store"
 )
+
+// Docker/Kubernetes secrets-file env vars (SPEC.md §15): a path in the env
+// var, the actual secret in the file it names. These are a container
+// convention, not a §8.1 flag with a Viper twin, so they are read via plain
+// os.Getenv rather than through config.Resolver — resolveSecurityFlags
+// still does no I/O beyond this and crypto/rand, so it can run before the
+// logger (which needs secrets registered first) is built.
+const (
+	basicAuthFileEnv = "DITTY_BASIC_AUTH_FILE"
+	jwtSecretFileEnv = "DITTY_JWT_SECRET_FILE"
+)
+
+// readSecretFile reads a Docker/Kubernetes secrets-style file, trimming a
+// single trailing newline the way most secret-mounting tooling writes
+// files.
+func readSecretFile(path string) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading secret file %q: %w", path, err)
+	}
+	return strings.TrimRight(string(b), "\r\n"), nil
+}
 
 // errSilent is returned by execRun when it has already printed the relevant
 // message itself (the bind guard's exact SPEC.md §6.1 wording) and cobra
@@ -117,7 +140,17 @@ func resolveSecurityFlags(resolver *config.Resolver) (securityConfig, []string, 
 		secrets = append(secrets, cfg.token)
 	}
 
-	if basicAuth := resolver.String("basic-auth"); basicAuth != "" {
+	basicAuth := resolver.String("basic-auth")
+	if basicAuth == "" {
+		if path := os.Getenv(basicAuthFileEnv); path != "" {
+			fileValue, err := readSecretFile(path)
+			if err != nil {
+				return cfg, nil, fmt.Errorf("%s: %w", basicAuthFileEnv, err)
+			}
+			basicAuth = fileValue
+		}
+	}
+	if basicAuth != "" {
 		user, pass, ok := strings.Cut(basicAuth, ":")
 		if !ok || user == "" {
 			return cfg, nil, fmt.Errorf("--basic-auth must be user:pass, got %q", basicAuth)
@@ -143,6 +176,15 @@ func resolveSecurityFlags(resolver *config.Resolver) (securityConfig, []string, 
 	cfg.authDBPath = resolver.String("auth-db")
 	if cfg.authDBPath != "" {
 		jwtSecret := resolver.String("jwt-secret")
+		if jwtSecret == "" {
+			if path := os.Getenv(jwtSecretFileEnv); path != "" {
+				fileValue, err := readSecretFile(path)
+				if err != nil {
+					return cfg, nil, fmt.Errorf("%s: %w", jwtSecretFileEnv, err)
+				}
+				jwtSecret = fileValue
+			}
+		}
 		if jwtSecret == "" {
 			// A random per-run secret (SPEC.md §6.2): restarting ditty
 			// invalidates every JWT session, the same story --token already

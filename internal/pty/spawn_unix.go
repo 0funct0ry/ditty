@@ -62,11 +62,16 @@ func Spawn(ctx context.Context, c Command) (*Process, error) {
 		return nil, fmt.Errorf("pty: spawn %q: %w", c.Argv[0], err)
 	}
 
-	pgid, err := syscall.Getpgid(cmd.Process.Pid)
-	if err != nil {
-		_ = ptmx.Close()
-		return nil, fmt.Errorf("pty: getpgid: %w", err)
-	}
+	// setsid(2) (done by StartWithSize above) makes the child the leader of
+	// a new session and, as a POSIX consequence, of a new process group
+	// whose pgid equals its own pid — this holds the instant the child is
+	// created and is not something the parent needs to (re)query. Calling
+	// getpgid(2) here to confirm it is not just redundant but actively
+	// racy for a fast-exiting child (e.g. `echo hi`): once the child has
+	// exited, some platforms (observed on darwin) can answer getpgid with
+	// ESRCH for a small window before the parent has even had a chance to
+	// reap it, well before that's a real leak or error condition.
+	pgid := cmd.Process.Pid
 
 	killSignal := c.KillSignal
 	if killSignal == nil {

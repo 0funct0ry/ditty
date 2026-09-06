@@ -1,0 +1,55 @@
+name: release
+
+# Manual dispatch only — pushing a tag does NOT run this workflow. Publishing
+# a real release always requires explicitly running this workflow by hand
+# (Actions tab → "release" → "Run workflow"), naming the existing tag to
+# build from.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing git tag to release (e.g. v1.2.0)"
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.4"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish release (binaries, checksums, Homebrew tap, container images)
+        run: make release-publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  # docs-deploy:
+  #   needs: release
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - run: echo "docs deploy arrives with M14 (SPEC.md §12)"

@@ -134,11 +134,11 @@ func TestRouter_EveryRoute(t *testing.T) {
 				}
 			})
 
-			t.Run("favicon missing", func(t *testing.T) {
+			t.Run("favicon served", func(t *testing.T) {
 				resp := get(t, server.URL+prefix+"/favicon.ico")
 				defer func() { _ = resp.Body.Close() }()
-				if resp.StatusCode != http.StatusNotFound {
-					t.Fatalf("status = %d, want 404 (web/dist ships no favicon)", resp.StatusCode)
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("status = %d, want 200 (web/dist ships a favicon since M13)", resp.StatusCode)
 				}
 			})
 

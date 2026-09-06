@@ -1,0 +1,41 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.4"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Every quality gate (fmt, vet, lint, staticcheck, test, coverage)
+        run: make check
+
+      - name: UI build
+        run: make web-build
+
+      - name: Bundle budget
+        run: make bundle-check
+
+      - name: Binary size budget
+        run: make size-check
+
+      - name: GoReleaser config lint (static check only, no build/publish)
+        run: make release-check
+
+      - name: Integration smoke test
+        run: make smoke

@@ -1,0 +1,108 @@
+version: 2
+
+project_name: ditty
+
+before:
+  hooks:
+    - make web-build
+
+builds:
+  - id: ditty
+    main: .
+    binary: ditty
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/0funct0ry/ditty/internal/buildinfo.Version={{ .Version }}
+      - -X github.com/0funct0ry/ditty/internal/buildinfo.Commit={{ .Commit }}
+      - -X github.com/0funct0ry/ditty/internal/buildinfo.Date={{ .Date }}
+    goos:
+      - linux
+      - darwin
+      - freebsd
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: SHA256SUMS
+
+changelog:
+  sort: asc
+  use: git
+  filters:
+    exclude:
+      - "^Merge "
+
+release:
+  github:
+    owner: 0funct0ry
+    name: ditty
+  extra_files:
+    - glob: ./scripts/install.sh
+  # Cosign signing is deferred for this milestone (see the M13 commit body);
+  # add a `signs:` block here when it's picked back up.
+  # Docs deploy is M14 — nothing to publish here yet.
+
+# Homebrew tap: distributed as a Cask rather than a Formula. GoReleaser v2's
+# `brews` (Formula) config is deprecated in favor of `homebrew_casks`, which
+# now supports plain-binary distribution (the `binaries:` field below) and
+# not just GUI apps — the actual replacement for `brews` in this pinned
+# GoReleaser version, not a different distribution model.
+homebrew_casks:
+  - name: ditty
+    repository:
+      owner: 0funct0ry
+      name: homebrew-tap
+    directory: Casks
+    homepage: https://github.com/0funct0ry/ditty
+    description: "Share a terminal over the web from a single Go binary"
+    license: MIT
+    binaries:
+      - ditty
+
+# dockers_v2 replaces the deprecated two-step dockers/docker_manifests
+# split: one entry per image variant, each already multi-arch (platforms:)
+# so GoReleaser builds and pushes the manifest in one step.
+dockers_v2:
+  - id: ditty-distroless
+    ids: [ditty]
+    dockerfile: Dockerfile
+    images:
+      - ghcr.io/0funct0ry/ditty
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    build_args:
+      VERSION: "{{ .Version }}"
+      COMMIT: "{{ .Commit }}"
+      DATE: "{{ .Date }}"
+  - id: ditty-alpine
+    ids: [ditty]
+    dockerfile: Dockerfile
+    images:
+      - ghcr.io/0funct0ry/ditty
+    tags:
+      - "{{ .Version }}-alpine"
+      - latest-alpine
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    flags:
+      - "--target=alpine"
+    build_args:
+      VERSION: "{{ .Version }}"
+      COMMIT: "{{ .Commit }}"
+      DATE: "{{ .Date }}"
