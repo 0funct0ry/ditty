@@ -48,8 +48,37 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
-  # docs-deploy:
-  #   needs: release
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - run: echo "docs deploy arrives with M14 (SPEC.md §12)"
+  docs-deploy:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.4"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build docs site (GitHub Pages base path)
+        run: make docs-deploy-build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/dist
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

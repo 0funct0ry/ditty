@@ -1,0 +1,56 @@
+---
+title: Sharing a terminal
+description: What happens end to end when you run ditty and someone opens the URL.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## The default: one Command, one browser
+
+Run `ditty` with no `--shared`, and every browser connection gets its own fresh Command and its own PTY:
+
+```sh
+ditty bash
+```
+
+Open the URL twice in two tabs and you get two independent shells, not one shell watched by two people. This is the default because it's the safer, less surprising behavior — nobody's keystrokes land in a terminal they didn't expect to share.
+
+## Sharing one session with multiple people
+
+Pass `--shared` to fan one Command and one PTY out to every Client that attaches:
+
+```sh
+ditty --shared -w tmux attach -t work
+```
+
+(Sharing the Command directly without `tmux` works too; `tmux` is what gives you persistence across ditty restarts — see the [shared session recipe](/recipes/shared-session/).)
+
+With `--shared`, the chrome bar's Client-count badge ("2 watching") appears once more than one browser is attached, and everyone sees the exact same terminal, live.
+
+## Read-only vs writable
+
+By default every Client is read-only: keystrokes are typed into the browser and go nowhere. The chrome bar always says which mode you're in — "read-only" or "read-write" — never silently. Pass `-w`/`--writable` to allow typing.
+
+<Aside type="danger" title="Read-only isn't a program-level guarantee">
+"Read-only" means ditty won't relay keystrokes into the PTY. It does not mean the program on the other end is safe to expose. See the [vim caveat](/security/#the-vim-caveat) before you rely on it.
+</Aside>
+
+## Who gets to resize the terminal
+
+When multiple Clients attach with different window sizes, one of them has to win. The rule: the first attached Client with write capability is the **sizing client**; if none has write, the first-attached Client sizes. Everyone else letterboxes — their view fits inside the real PTY size rather than resizing it — and sees a one-time note: "Sized by Client 1 · 120×34". If the sizing Client detaches, the role passes to the next Client by join order.
+
+Pin the size instead of letting it float with `--cols`/`--rows`.
+
+## Reconnecting
+
+If your connection drops, ditty doesn't clear your terminal — it freezes the last frame and shows a countdown ("Reconnecting in 3s · press Enter to retry now"). On reconnect it replays from its output ring buffer, so you don't lose what happened while you were gone (up to `--scrollback-bytes`, default 256 KiB).
+
+## When the Command exits
+
+The terminal freezes and shows the exit summary — command, exit code, duration — with no auto-reconnect. `--once` makes the whole session (not just one Client) self-destruct after the first Client detaches; see the [one-shot support link recipe](/recipes/one-shot-support-link/).
+
+## Next
+
+- [Recipes](/recipes/shared-session/) for concrete compositions.
+- [Security](/security/) before you bind to anything but loopback.
+- [Themes](/themes/) to change how it looks.

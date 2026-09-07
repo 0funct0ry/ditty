@@ -21,4 +21,8 @@ func registerTransportFlags(fs *pflag.FlagSet) {
 			"a value sets that CSP frame-ancestors source, and the bare flag with no "+
 			"value omits frame-ancestors entirely (allows any framer)")
 	fs.Lookup("allow-iframe").NoOptDefVal = "*"
+	fs.String("socket", "",
+		"listen on this Unix socket path instead of --address/--port (SPEC.md §8.1); mutually exclusive with both")
+	fs.String("socket-mode", "0600", "file mode for the Unix socket, e.g. 0600 (--socket only)")
+	fs.String("socket-owner", "", "user[:group] to chown the Unix socket to (--socket only)")
 }

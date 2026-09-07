@@ -39,3 +39,18 @@ jobs:
 
       - name: Integration smoke test
         run: make smoke
+
+      - name: Docs dependencies
+        run: make docs-deps
+
+      - name: CLI reference drift check
+        run: make docs-drift-check
+
+      - name: Docs build
+        run: make docs-build
+
+      - name: Docs link check
+        run: make docs-link-check
+
+      - name: Docs recipe verification
+        run: make docs-verify-recipes

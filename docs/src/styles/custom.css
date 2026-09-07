@@ -1,0 +1,97 @@
+/* ditty docs theme — palette and type lifted from internal-docs/DOCS-MOCKUP.html
+   so the docs site, the marketing page and the app feel like one thing. */
+
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;1,7..72,400&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+  --ditty-paper: #f6f6f3;
+  --ditty-paper-2: #ecede8;
+  --ditty-ink: #171b24;
+  --ditty-ink-deep: #0e1116;
+  --ditty-rule: #dcded6;
+  --ditty-rule-soft: #e7e9e2;
+  --ditty-pine: #2c7a6b;
+  --ditty-saffron: #b8830f;
+  --ditty-rust: #b24e38;
+  --ditty-muted: #5f6673;
+
+  --sl-font: 'Literata', Georgia, serif;
+  --sl-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --sl-color-white: var(--ditty-ink);
+  --sl-color-black: var(--ditty-paper);
+  --sl-color-accent: var(--ditty-pine);
+  --sl-color-accent-high: #1f5c50;
+  --sl-color-accent-low: #dceae6;
+  --sl-color-text: var(--ditty-ink);
+  --sl-color-text-accent: var(--ditty-pine);
+  --sl-color-bg: var(--ditty-paper);
+  --sl-color-bg-nav: var(--ditty-paper);
+  --sl-color-bg-sidebar: var(--ditty-paper);
+  --sl-color-bg-inline-code: var(--ditty-paper-2);
+  --sl-color-hairline: var(--ditty-rule);
+  --sl-color-hairline-light: var(--ditty-rule-soft);
+  --sl-color-hairline-shade: var(--ditty-rule);
+}
+
+:root[data-theme='dark'] {
+  --sl-color-white: var(--ditty-paper);
+  --sl-color-black: var(--ditty-ink-deep);
+  --sl-color-accent: #5fb3a3;
+  --sl-color-accent-high: #a6d9cf;
+  --sl-color-accent-low: #16332e;
+  --sl-color-text: #dce0e6;
+  --sl-color-text-accent: #5fb3a3;
+  --sl-color-bg: var(--ditty-ink-deep);
+  --sl-color-bg-nav: var(--ditty-ink-deep);
+  --sl-color-bg-sidebar: var(--ditty-ink-deep);
+  --sl-color-bg-inline-code: #171b24;
+  --sl-color-hairline: #2c3342;
+  --sl-color-hairline-light: #232a37;
+  --sl-color-hairline-shade: #2c3342;
+}
+
+body {
+  font-family: var(--sl-font);
+}
+
+h1,
+h2,
+h3,
+h4,
+nav,
+.sidebar-content,
+th,
+.right-sidebar,
+code {
+  font-family: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+}
+
+code,
+pre,
+kbd,
+.expressive-code {
+  font-family: var(--sl-font-mono);
+}
+
+.sl-markdown-content code:not(pre code) {
+  font-family: var(--sl-font-mono);
+}
+
+/* Callouts (asides) pick up ditty's three accent colors, border-left style
+   like the mockup rather than a filled background. */
+.sl-markdown-content .starlight-aside {
+  border: none;
+  border-left: 3px solid var(--ditty-pine);
+  background: transparent;
+  border-radius: 0;
+  padding-left: 1rem;
+}
+
+.sl-markdown-content .starlight-aside--caution {
+  border-left-color: var(--ditty-saffron);
+}
+
+.sl-markdown-content .starlight-aside--danger {
+  border-left-color: var(--ditty-rust);
+}

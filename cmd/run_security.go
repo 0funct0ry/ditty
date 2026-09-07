@@ -231,10 +231,12 @@ type deferredWarning struct {
 // disabled, kept separate from Grants because /t/:token and /api/logout
 // need its Exchange method specifically), and the JWTGrant (nil unless
 // authStore is non-nil, i.e. --auth-db was passed). address is the address
-// ditty is about to bind, used only to decide whether --basic-auth over
-// plaintext is refused (SPEC.md §6.2). It does no logging itself — any
-// warning is returned for the caller to log once the banner is up.
-func buildGrants(cfg securityConfig, basePath, address string, authStore *store.Store) (
+// ditty is about to bind (or the Unix socket path when isUnixSocket), used
+// only to decide whether --basic-auth over plaintext is refused (SPEC.md
+// §6.2) — a Unix socket is exempted the same way loopback is, since reaching
+// it already requires local filesystem access. It does no logging itself —
+// any warning is returned for the caller to log once the banner is up.
+func buildGrants(cfg securityConfig, basePath, address string, isUnixSocket bool, authStore *store.Store) (
 	security.Grants, *security.TokenGrant, *security.JWTGrant, []deferredWarning, error,
 ) {
 	var grants security.Grants
@@ -248,7 +250,7 @@ func buildGrants(cfg securityConfig, basePath, address string, authStore *store.
 	}
 
 	if cfg.basicAuth != "" {
-		if cfg.tlsCert == "" && !cfg.insecureBasicOverHTTP && !security.IsLoopbackAddr(address) {
+		if cfg.tlsCert == "" && !cfg.insecureBasicOverHTTP && !isUnixSocket && !security.IsLoopbackAddr(address) {
 			return nil, nil, nil, nil, fmt.Errorf(
 				"--basic-auth over plaintext on a non-loopback address requires --insecure-basic-over-http (SPEC.md §6.2)")
 		}

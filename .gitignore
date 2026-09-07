@@ -41,6 +41,7 @@ bin/tools/
 dist/
 node_modules/
 *.tsbuildinfo
+.astro/
 go.mod.bak
 go.sum.bak
 .agent/

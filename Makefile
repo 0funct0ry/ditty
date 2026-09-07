@@ -172,13 +172,11 @@ web-dev: ## Run the Vite dev server
 	@cd $(WEB_DIR) && npm run dev
 
 .PHONY: web-build
-web-build: ## Build the frontend into web/dist
-	$(call need,$(WEB_DIR)/package.json,the web app arrives in M4 (SPEC.md §12))
+web-build: web-deps ## Build the frontend into web/dist
 	@cd $(WEB_DIR) && npm run build
 
 .PHONY: web-test
-web-test: ## Run the Vitest suite
-	$(call need,$(WEB_DIR)/package.json,the web app arrives in M4 (SPEC.md §12))
+web-test: web-deps ## Run the Vitest suite
 	@cd $(WEB_DIR) && npm run test
 
 .PHONY: e2e
@@ -223,7 +221,7 @@ lint-fix: $(GOLANGCI) ## Run golangci-lint with --fix
 check: tidy-check fmt-check vet lint staticcheck test cover-check ## Every gate CI enforces on Go code
 
 .PHONY: ci
-ci: check web-build bundle-check size-check release-check ## The full CI pipeline, locally
+ci: check web-build bundle-check size-check release-check docs-drift-check docs-build docs-link-check docs-verify-recipes ## The full CI pipeline, locally
 
 ##@ Test
 
@@ -330,15 +328,64 @@ docker-alpine: ## Build the alpine container image
 
 ##@ Docs
 
+DOCS_CLI_DIR := $(DOCS_DIR)/src/content/docs/reference/cli
+LYCHEE_VERSION ?= v0.24.2
+LYCHEE         := $(TOOLS_DIR)/lychee
+
+$(LYCHEE):
+	@mkdir -p $(TOOLS_DIR)
+	@case "$$(uname -s)-$$(uname -m)" in \
+	  Linux-x86_64)   asset=lychee-x86_64-unknown-linux-gnu.tar.gz ;; \
+	  Linux-aarch64)  asset=lychee-aarch64-unknown-linux-gnu.tar.gz ;; \
+	  Darwin-x86_64)  asset=lychee-x86_64-apple-darwin.tar.gz ;; \
+	  Darwin-arm64)   asset=lychee-aarch64-apple-darwin.tar.gz ;; \
+	  *) echo "make: unsupported platform for lychee: $$(uname -s)-$$(uname -m)" >&2; exit 1 ;; \
+	esac; \
+	url="https://github.com/lycheeverse/lychee/releases/download/lychee-$(LYCHEE_VERSION)/$$asset"; \
+	tmp=$$(mktemp -d); \
+	curl -fsSL "$$url" -o "$$tmp/lychee.tar.gz"; \
+	tar -xzf "$$tmp/lychee.tar.gz" -C "$$tmp"; \
+	install "$$(find "$$tmp" -type f -name lychee)" $(LYCHEE); \
+	rm -rf "$$tmp"
+
+.PHONY: docs-deps
+docs-deps: ## Install docs site dependencies
+	$(call need,$(DOCS_DIR)/package.json,the docs site arrives with M14 (SPEC.md §12))
+	@cd $(DOCS_DIR) && npm ci
+
+.PHONY: gen-docs
+gen-docs: build ## Regenerate the CLI reference markdown from Cobra
+	@mkdir -p $(DOCS_CLI_DIR)
+	@$(BIN_DIR)/$(BINARY) gen-docs --out $(DOCS_CLI_DIR)
+
+.PHONY: docs-drift-check
+docs-drift-check: gen-docs ## Fail if generated CLI docs differ from the committed copy (CI gate)
+	@{ git diff --exit-code -- $(DOCS_CLI_DIR) && \
+	   [[ -z "$$(git status --porcelain -- $(DOCS_CLI_DIR))" ]]; } || { \
+	  echo "make: CLI reference docs are out of date — run 'make gen-docs' and commit" >&2; exit 1; }
+
 .PHONY: docs-dev
 docs-dev: ## Run the docs site locally
 	$(call need,$(DOCS_DIR)/package.json,the docs site arrives with M14 (SPEC.md §12))
 	@cd $(DOCS_DIR) && npm run dev
 
 .PHONY: docs-build
-docs-build: ## Build the docs site
+docs-build: gen-docs ## Build the docs site (regenerates the CLI reference first)
 	$(call need,$(DOCS_DIR)/package.json,the docs site arrives with M14 (SPEC.md §12))
 	@cd $(DOCS_DIR) && npm run build
+
+.PHONY: docs-link-check
+docs-link-check: $(LYCHEE) docs-build ## Check the built docs site for broken internal links
+	$(LYCHEE) --offline --no-progress --root-dir "$(CURDIR)/$(DOCS_DIR)/dist" $(DOCS_DIR)/dist
+
+.PHONY: docs-deploy-build
+docs-deploy-build: gen-docs ## Build the docs site with the real GitHub Pages base path (CI only)
+	$(call need,$(DOCS_DIR)/package.json,the docs site arrives with M14 (SPEC.md §12))
+	@cd $(DOCS_DIR) && DITTY_DOCS_BASE=/ditty npm run build
+
+.PHONY: docs-verify-recipes
+docs-verify-recipes: build ## Run the §11 recipe commands against the built binary (SPEC.md §12 M14)
+	@DITTY_BIN=$(CURDIR)/$(BIN_DIR)/$(BINARY) bash $(DOCS_DIR)/scripts/verify-recipes.sh
 
 ##@ Housekeeping
 
@@ -349,4 +396,4 @@ clean: ## Remove build and test artifacts
 
 .PHONY: clean-all
 clean-all: clean ## Also remove installed tools, web build output and node_modules
-	@rm -rf $(TOOLS_DIR) $(WEB_DIST) $(WEB_DIR)/node_modules $(DOCS_DIR)/node_modules
+	@rm -rf $(TOOLS_DIR) $(WEB_DIST) $(WEB_DIR)/node_modules $(DOCS_DIR)/node_modules $(DOCS_DIR)/dist

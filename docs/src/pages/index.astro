@@ -1,0 +1,476 @@
+---
+// The marketing homepage — a faithful build of internal-docs/MARKETING-MOCKUP.html,
+// not a Starlight page, so it isn't wrapped in the docs chrome (sidebar/TOC).
+// Links point at the real docs routes; everything else is the mockup as-is.
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ditty — share a terminal over the web</title>
+<meta name="description" content="Share a terminal over the web from a single Go binary. Read-only by default, so watching is safe and typing is a decision.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;1,7..72,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#171B24;
+  --ink-deep:#0E1116;
+  --ink-soft:#212734;
+  --line:#2C3342;
+  --paper:#ECEDE8;
+  --paper-2:#F6F6F3;
+  --rule:#D3D6CE;
+  --pine:#2C7A6B;
+  --pine-bright:#3D9C87;
+  --saffron:#B8830F;
+  --saffron-bright:#E0A32E;
+  --rust:#B24E38;
+  --muted:#5F6673;
+  --sans:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;
+  --serif:'Literata',Georgia,serif;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--serif);font-size:16.5px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,nav,.mono,code,pre,.btn,.tag,th{font-family:var(--sans)}
+code,pre,.mono{font-family:var(--mono)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+a{color:var(--pine);text-decoration-thickness:1px;text-underline-offset:3px}
+
+/* ---------- nav ---------- */
+nav{
+  display:flex;align-items:center;gap:22px;padding:20px 24px;
+  max-width:1080px;margin:0 auto;font-size:14.5px;
+}
+.logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:20px;letter-spacing:-.03em;text-decoration:none;color:var(--ink)}
+.logo .logomark{flex:0 0 auto;color:var(--ink)}
+nav .grow{flex:1}
+nav a{color:var(--ink);text-decoration:none}
+nav a:hover{color:var(--pine)}
+nav .gh{border:1px solid var(--rule);border-radius:6px;padding:5px 11px}
+
+/* ---------- hero ---------- */
+.hero{padding:34px 0 0;position:relative;overflow:hidden}
+.staffbg{position:absolute;left:0;right:0;top:170px;height:120px;pointer-events:none}
+.staffbg i{position:absolute;left:0;right:0;height:1px;background:var(--rule)}
+.staffbg i:nth-child(1){top:0}.staffbg i:nth-child(2){top:24px}
+.staffbg i:nth-child(3){top:48px}.staffbg i:nth-child(4){top:72px}
+.staffbg i:nth-child(5){top:96px}
+h1{
+  font-size:clamp(38px,6.2vw,68px);line-height:1.02;font-weight:600;
+  letter-spacing:-.045em;margin:0 0 18px;max-width:15ch;
+}
+.lede{font-size:19px;max-width:52ch;margin:0 0 26px;color:#2C333F}
+.cta{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:34px}
+.btn{
+  display:inline-block;background:var(--ink);color:var(--paper-2);text-decoration:none;
+  padding:10px 17px;border-radius:7px;font-weight:500;font-size:15px;border:1px solid var(--ink);
+}
+.btn:hover{background:#242B38}
+.btn.alt{background:none;color:var(--ink);border-color:var(--rule)}
+.btn.alt:hover{background:#E3E5DE}
+.instant{display:flex;gap:8px;flex-wrap:wrap}
+.instant .pill{
+  display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12.5px;
+  color:var(--pine);background:#dceae6;border:1px solid #c3ddd6;border-radius:999px;
+  padding:5px 12px 5px 10px;font-weight:500;
+}
+.instant .pill svg{width:13px;height:13px;flex:0 0 auto}
+
+/* hero screencasts */
+.demo{
+  display:grid;grid-template-columns:1fr 1fr;gap:18px;
+}
+.shot{margin:0;background:var(--ink-deep);border-radius:11px;overflow:hidden;
+  box-shadow:0 26px 60px -20px rgba(23,27,36,.45),0 2px 0 rgba(255,255,255,.5) inset;
+  border:1px solid var(--ink);
+}
+.shot figcaption{
+  height:38px;background:var(--ink);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;padding:0 13px;
+  font-family:var(--sans);font-size:12.5px;color:#A6ADB9;
+}
+.shot img{display:block;width:100%;height:auto}
+@media (max-width:800px){.demo{grid-template-columns:1fr}}
+.hero-note{margin:14px 0 0;font-size:14px;color:var(--muted);max-width:60ch}
+
+/* ---------- sections ---------- */
+section{padding:70px 0}
+section.tight{padding:46px 0}
+h2{font-size:clamp(25px,3.4vw,34px);line-height:1.12;letter-spacing:-.035em;font-weight:600;margin:0 0 12px}
+.sub{font-size:17px;color:var(--muted);max-width:56ch;margin:0 0 34px}
+
+/* three invariants — asymmetric, not identical cards */
+.invariants{border-top:2px solid var(--ink)}
+.inv{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:34px;
+  padding:26px 0;border-bottom:1px solid var(--rule);align-items:start;
+}
+.inv h3{margin:0;font-size:21px;letter-spacing:-.03em;font-weight:600}
+.inv h3 span{display:block;font-family:var(--mono);font-size:12px;color:var(--pine);font-weight:400;margin-bottom:5px}
+.inv p{margin:0 0 12px}
+.inv pre{
+  background:var(--ink-deep);color:#D3D8DF;border-radius:8px;padding:13px 15px;
+  font-size:12.5px;line-height:1.6;overflow-x:auto;margin:0;white-space:pre;
+}
+.inv pre .r{color:#E08070}.inv pre .d{color:#6B7484}.inv pre .g{color:#5FC9A8}.inv pre .y{color:#E5B95C}
+
+/* recipes */
+.recipes{display:flex;flex-direction:column;border-top:1px solid var(--rule)}
+.recipe{
+  display:grid;grid-template-columns:56px minmax(0,1fr);gap:26px;
+  padding:30px 6px;border-bottom:1px solid var(--rule);
+}
+.recipe .num{
+  font-family:var(--mono);font-size:14px;font-weight:700;padding-top:4px;
+  color:var(--pine);
+}
+.recipe:nth-child(3n+2) .num{color:var(--saffron)}
+.recipe:nth-child(3n) .num{color:var(--rust)}
+.recipe .more{color:var(--pine)}
+.recipe:nth-child(3n+2) .more{color:var(--saffron)}
+.recipe:nth-child(3n) .more{color:var(--rust)}
+.recipe h3{margin:0 0 8px;font-size:19px;font-weight:600;letter-spacing:-.025em}
+.recipe p{margin:0 0 16px;font-size:14.5px;color:#333A46;line-height:1.6;max-width:62ch}
+.recipe pre{
+  display:block;margin:0 0 12px;background:var(--ink-deep);color:#CFE7DF;
+  border-radius:8px;padding:13px 15px;font-size:12.5px;line-height:1.65;
+  overflow-x:auto;white-space:pre;font-family:var(--mono);
+  scrollbar-width:thin;scrollbar-color:var(--line) var(--ink-deep);
+}
+.recipe pre::-webkit-scrollbar{height:6px}
+.recipe pre::-webkit-scrollbar-track{background:var(--ink-deep)}
+.recipe pre::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+.recipe .more{
+  display:inline-flex;align-items:center;gap:5px;font-family:var(--sans);
+  font-size:13.5px;font-weight:500;text-decoration:none;
+}
+.recipe .more svg{width:13px;height:13px;transition:transform .15s ease}
+.recipe .more:hover svg{transform:translateX(3px)}
+@media (max-width:640px){
+  .recipe{grid-template-columns:1fr;gap:8px}
+  .recipe .num{padding-top:0}
+}
+
+/* install */
+.install{background:var(--ink);color:#E4E7EC;border-radius:12px;padding:30px 32px}
+.install h2{color:#fff;margin-bottom:20px}
+.install .cols{display:flex;flex-direction:column;gap:18px}
+.install h4{margin:0 0 7px;font-family:var(--sans);font-size:13px;color:#A6ADB9;font-weight:500}
+.install .cmd{position:relative}
+.install pre{
+  background:var(--ink-deep);border:1px solid var(--line);border-radius:7px;
+  padding:11px 44px 11px 13px;margin:0;font-size:12.5px;color:#CFE7DF;
+  overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--line) var(--ink-deep);
+}
+.install pre::-webkit-scrollbar{height:6px}
+.install pre::-webkit-scrollbar-track{background:var(--ink-deep)}
+.install pre::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+.install pre::-webkit-scrollbar-thumb:hover{background:#3A4152}
+.copy-btn{
+  position:absolute;top:7px;right:7px;width:26px;height:26px;display:flex;
+  align-items:center;justify-content:center;background:transparent;border:1px solid var(--line);
+  border-radius:5px;color:#A6ADB9;cursor:pointer;padding:0;
+}
+.copy-btn:hover{background:var(--line);color:#E4E7EC}
+.copy-btn.copied{color:var(--pine-bright);border-color:var(--pine-bright)}
+.copy-btn svg{width:14px;height:14px;pointer-events:none}
+
+/* not-doing */
+.honest{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:26px}
+.honest div h4{margin:0 0 6px;font-family:var(--sans);font-size:15.5px;font-weight:600}
+.honest div p{margin:0;font-size:14.5px;color:#333A46}
+
+footer{border-top:1px solid var(--rule);padding:30px 0 50px;font-size:14px;color:var(--muted)}
+footer .fl{display:flex;gap:20px;flex-wrap:wrap}
+footer a{color:var(--muted)}
+
+@media (max-width:720px){
+  .inv{grid-template-columns:1fr;gap:14px}
+  .staffbg{display:none}
+  nav .hidem{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="logo" href="/"><svg class="logomark" viewBox="0 0 20 20" width="20" height="20" fill="none" aria-hidden="true"><rect x="1.4" y="2.9" width="17.2" height="12.4" rx="2.1" stroke="currentColor" stroke-width="1.4"/><path d="M4.3 6.7l2.6 2.3-2.6 2.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><rect x="8.3" y="10.3" width="3.3" height="1.5" rx="0.3" fill="var(--pine)"/><path d="M6.5 17.4h7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>ditty</a>
+  <span class="grow"></span>
+  <a href="#recipes" class="hidem">Recipes</a>
+  <a href="#install">Install</a>
+  <a href="/quickstart/">Docs</a>
+  <a href="https://github.com/0funct0ry/ditty" class="gh">GitHub</a>
+</nav>
+
+<header class="hero">
+  <div class="staffbg" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="wrap">
+    <h1>Share a terminal over the web.</h1>
+    <p class="lede">One command turns any shell, log tail or TUI into a link you can send. Read-only by default, so watching is safe and typing is a decision.</p>
+    <div class="cta">
+      <a class="btn" href="#install">Install ditty</a>
+      <a class="btn alt" href="#recipes">See the recipes</a>
+      <span class="instant">
+        <span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/></svg>one binary</span>
+        <span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m9 12 2 2 4-4"/></svg>zero config</span>
+        <span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5z"/></svg>secure by default</span>
+      </span>
+    </div>
+
+    <div class="demo">
+      <figure class="shot">
+        <figcaption>Run this</figcaption>
+        <img src="/assets/ditty-top.gif" alt="Terminal showing ditty top being invoked, printing the startup banner with the session URL." loading="lazy">
+      </figure>
+      <figure class="shot">
+        <figcaption>They see this</figcaption>
+        <img src="/assets/ditty-top-web.gif" alt="The same ditty top session, live and read-only, open in a web browser." loading="lazy">
+      </figure>
+    </div>
+    <p class="hero-note">Whoever opens the link watches live. Neither installed anything, and neither could type.</p>
+  </div>
+</header>
+
+<section id="install">
+  <div class="wrap">
+    <div class="install">
+      <h2>Install</h2>
+      <div class="cols">
+        <div>
+          <h4>Homebrew</h4>
+          <div class="cmd">
+            <pre>brew install 0funct0ry/tap/ditty</pre>
+            <button class="copy-btn" type="button" aria-label="Copy command">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+        <div>
+          <h4>Go</h4>
+          <div class="cmd">
+            <pre>go install github.com/0funct0ry/ditty@latest</pre>
+            <button class="copy-btn" type="button" aria-label="Copy command">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+        <div>
+          <h4>Docker</h4>
+          <div class="cmd">
+            <pre>docker run -p 7654:7654 ghcr.io/0funct0ry/ditty htop</pre>
+            <button class="copy-btn" type="button" aria-label="Copy command">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+        <div>
+          <h4>Install script</h4>
+          <div class="cmd">
+            <pre>curl -fsSL https://github.com/0funct0ry/ditty/releases/latest/download/install.sh | sh</pre>
+            <button class="copy-btn" type="button" aria-label="Copy command">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="tight">
+  <div class="wrap invariants">
+    <div class="inv">
+      <h3><span>invariant one</span>Nobody types unless you say so</h3>
+      <div>
+        <p>Input from a browser is discarded on the server, before it reaches the pseudo-terminal. The browser has no switch to flip. Pass <code>-w</code> and you have opted in, deliberately, in the command you typed.</p>
+        <pre><span class="d">$</span> ditty htop              <span class="d"># watchers only</span>
+<span class="d">$</span> ditty -w tmux attach     <span class="d"># now they can drive</span></pre>
+      </div>
+    </div>
+    <div class="inv">
+      <h3><span>invariant two</span>It refuses to expose a shell by accident</h3>
+      <div>
+        <p>Binding anywhere other than localhost without an authentication method doesn't warn you. It stops, and tells you exactly which flag to add.</p>
+        <pre><span class="d">$</span> ditty -a 0.0.0.0 bash
+<span class="r">ditty: refusing to listen on 0.0.0.0:7654 without authentication.</span>
+
+  This would expose `bash` to your entire network.
+
+  Pick one:
+    <span class="g">--token</span>                  random URL token
+    <span class="g">--basic-auth</span> user:pass   HTTP basic authentication
+    <span class="g">--client-ca</span> ca.pem       mutual TLS
+    <span class="y">--insecure-no-auth</span>       I understand; do it anyway</pre>
+      </div>
+    </div>
+    <div class="inv">
+      <h3><span>invariant three</span>The URL is a secret by default</h3>
+      <div>
+        <p>Every session gets a random token, even on localhost. It lives in the path and is swapped for a cookie on first load, so it never reaches proxy logs or a <code>Referer</code> header. The full link is printed at startup, so zero-config stays zero-config.</p>
+        <pre><span class="d">$</span> ditty --open vim notes.md
+  url       <span class="g">http://127.0.0.1:7654/t/2b81f0ac94d7e365</span>
+  <span class="d">opening your browser…</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="recipes">
+  <div class="wrap">
+    <h2>Some ways people actually use ditty</h2>
+    <p class="sub">ditty bridges one pseudo-terminal to browsers and gets out of the way — everything else here composes it with tools you already run, like tmux, Docker and nginx. See the <a href="/recipes/shared-session/">full recipe pages</a> for the risks and failure modes of each.</p>
+    <div class="recipes">
+      <div class="recipe">
+        <span class="num">01</span>
+        <div>
+          <h3>Let two people drive one shell</h3>
+          <p>tmux already handles multiple typists and survives ditty restarting. Use it.</p>
+          <pre>tmux new -s work
+ditty -w tmux attach -t work</pre>
+          <a class="more" href="/recipes/shared-session/">Read the full recipe <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        </div>
+      </div>
+      <div class="recipe">
+        <span class="num">02</span>
+        <div>
+          <h3>Broadcast a log or a dashboard</h3>
+          <p>Colours, cursor moves and full-screen redraws all survive the trip. Joining mid-flight repaints instantly.</p>
+          <pre>ditty htop
+ditty tail -f /var/log/nginx/access.log</pre>
+          <a class="more" href="/recipes/read-only-broadcast/">Read the full recipe <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        </div>
+      </div>
+      <div class="recipe">
+        <span class="num">03</span>
+        <div>
+          <h3>Hand a shell to someone you don't trust</h3>
+          <p>ditty is not a sandbox and never claims to be. Make the container the sandbox.</p>
+          <pre>ditty -w docker run --rm -it --network none --memory 256m alpine sh</pre>
+          <a class="more" href="/recipes/sandboxed-shell/">Read the full recipe <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        </div>
+      </div>
+      <div class="recipe">
+        <span class="num">04</span>
+        <div>
+          <h3>Put it behind your existing SSO</h3>
+          <p>Serve on a Unix socket, let nginx or oauth2-proxy decide who gets in, and trust the header it sets.</p>
+          <pre>ditty --socket /run/ditty.sock --base-path /term \
+  --trust-proxy 127.0.0.1/32 \
+  --trust-header X-Auth-Request-Email bash</pre>
+          <a class="more" href="/recipes/behind-nginx-sso/">Read the full recipe <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        </div>
+      </div>
+      <div class="recipe">
+        <span class="num">05</span>
+        <div>
+          <h3>Send a link that self-destructs</h3>
+          <p>One client, ever. Thirty seconds after they close the tab, the process is gone.</p>
+          <pre>ditty --once --wait-for-client 5m --detach-grace 30s -w bash</pre>
+          <a class="more" href="/recipes/one-shot-support-link/">Read the full recipe <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        </div>
+      </div>
+      <div class="recipe">
+        <span class="num">06</span>
+        <div>
+          <h3>Debug a container from a browser</h3>
+          <p>Distroless image, no shell inside it, your command supplies the shell.</p>
+          <pre>docker run -p 7654:7654 -e DITTY_BASIC_AUTH=me:hunter2 \
+  ghcr.io/0funct0ry/ditty -w sh</pre>
+          <a class="more" href="/docker/">Read about the container images <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="tight">
+  <div class="wrap">
+    <h2>Reconnecting doesn't lose the screen</h2>
+    <p class="sub">ditty keeps the last 256 KB of terminal output in a ring buffer. Every client that attaches — first join or after your laptop slept through a tunnel — gets that replayed before live output resumes. You come back to <code>htop</code>, not to a blank rectangle.</p>
+  </div>
+</section>
+
+<section class="tight">
+  <div class="wrap">
+    <h2>Things ditty will not do</h2>
+    <p class="sub">Stated up front, so you don't discover them later. See <a href="/security/">Security</a> for the full picture.</p>
+    <div class="honest">
+      <div><h4>It is not a sandbox</h4><p>A read-only session still exposes whatever the program can do. <code>--writable</code> on <code>less</code> or <code>vim</code> is a shell. Use a container when the audience is untrusted.</p></div>
+      <div><h4>It has no user accounts</h4><p>There is optional SQLite login for small teams. For anything real, put ditty behind the identity provider you already run.</p></div>
+      <div><h4>It does not multiplex</h4><p>tmux and screen are excellent at persistence and multiple typists. ditty attaches to them rather than competing with them.</p></div>
+      <div><h4>It does not emulate a shell</h4><p>Every session is a real pseudo-terminal running a real process. If it doesn't work in your terminal, it won't work here either.</p></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="fl">
+      <span>ditty — a short simple song</span>
+      <a href="https://github.com/0funct0ry/ditty">GitHub</a><a href="/quickstart/">Docs</a><a href="/security/">Security</a><a href="https://github.com/0funct0ry/ditty/releases">Changelog</a>
+    </div>
+    <p style="margin:14px 0 0">MIT. Built by 0funct0ry.</p>
+  </div>
+</footer>
+
+<script>
+  const checkIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+  // Falls back to the older execCommand('copy') when the async Clipboard
+  // API is unavailable or its permission is denied (some embedded/automated
+  // browser contexts refuse clipboard-write outright) — a real click in an
+  // ordinary tab satisfies either path.
+  function legacyCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    const originalIcon = btn.innerHTML;
+    btn.addEventListener('click', async () => {
+      const pre = btn.previousElementSibling;
+      const text = pre ? pre.textContent ?? '' : '';
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch {
+        ok = legacyCopy(text);
+      }
+      if (!ok) return;
+      btn.innerHTML = checkIcon;
+      btn.classList.add('copied');
+      btn.setAttribute('aria-label', 'Copied');
+      setTimeout(() => {
+        btn.innerHTML = originalIcon;
+        btn.classList.remove('copied');
+        btn.setAttribute('aria-label', 'Copy command');
+      }, 1500);
+    });
+  });
+</script>
+
+</body>
+</html>

@@ -1,0 +1,80 @@
+---
+title: Quickstart
+description: Share your first terminal with ditty in fifteen seconds.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+<Steps>
+
+1. Install ditty. See [Install](/install/) if you haven't already.
+
+2. Share something read-only:
+
+   ```sh
+   ditty htop
+   ```
+
+3. ditty prints a banner with a one-time URL:
+
+   ```
+   ditty v1.0.0
+
+     session   01JBQ8… (htop)
+     url       http://127.0.0.1:7654/t/9f3ac1d0e77b4a2c
+     access    read-only · token · 0 clients
+   ```
+
+4. Open the URL. `htop` is now visible in the browser, live, read-only.
+
+5. Ctrl-C in the terminal that ran `ditty` to stop sharing.
+
+</Steps>
+
+## Share something you can type into
+
+Add `-w`:
+
+```sh
+ditty -w bash
+```
+
+Anyone with the URL can now type into that shell. Read carefully before you do this on anything but loopback — see [Security](/security/).
+
+## Share it on your network, not just this machine
+
+```sh
+ditty -a 0.0.0.0 -w bash
+```
+
+ditty refuses to start here unless a Grant is configured (`--token` is implied by default, so this actually works as written — the token is what makes it safe). If you disable every Grant, you'll hit the bind guard:
+
+```sh
+ditty -a 0.0.0.0 --no-token -w bash
+```
+
+```
+  ditty: refusing to listen on 0.0.0.0:7654 without authentication.
+
+  This would expose `bash` to your entire network.
+
+  Pick one:
+    --token                  random URL token (printed at startup)
+    --basic-auth user:pass   HTTP basic authentication
+    --auth-db ditty.db       SQLite users + JWT login page
+    --client-ca ca.pem       mutual TLS
+    --trust-header X-User    delegate to your reverse proxy
+    --insecure-no-auth       I understand; do it anyway
+```
+
+That refusal is deliberate. See [Security](/security/) for why.
+
+<Aside type="tip">
+`--open` launches your browser at the printed URL automatically, so `ditty --open htop` is the fastest path from "nothing running" to "watching it in a tab".
+</Aside>
+
+## Next
+
+- [Sharing a terminal](/sharing-a-terminal/) — the fuller walkthrough, including roster and reconnect behavior.
+- [Recipes](/recipes/shared-session/) — five real compositions with `tmux`, `docker` and a reverse proxy.
+- [Security](/security/) — read this before you point ditty at anything but loopback.

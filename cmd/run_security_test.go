@@ -112,7 +112,7 @@ func TestBuildGrants_TokenAndBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSecurityFlags: %v", err)
 	}
-	grants, tokenGrant, _, _, err := buildGrants(cfg, "/", "0.0.0.0:7654", nil)
+	grants, tokenGrant, _, _, err := buildGrants(cfg, "/", "0.0.0.0:7654", false, nil)
 	if err != nil {
 		t.Fatalf("buildGrants: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestBuildGrants_BasicOverPlaintextRefusedOnLAN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSecurityFlags: %v", err)
 	}
-	if _, _, _, _, err := buildGrants(cfg, "/", "192.168.1.24:7654", nil); err == nil {
+	if _, _, _, _, err := buildGrants(cfg, "/", "192.168.1.24:7654", false, nil); err == nil {
 		t.Fatal("buildGrants(--basic-auth over plaintext LAN, no override) = nil error, want error")
 	}
 }
@@ -144,7 +144,7 @@ func TestBuildGrants_TrustHeaderWithoutTrustProxyWarnsAndSkips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSecurityFlags: %v", err)
 	}
-	grants, _, _, warnings, err := buildGrants(cfg, "/", "127.0.0.1:7654", nil)
+	grants, _, _, warnings, err := buildGrants(cfg, "/", "127.0.0.1:7654", false, nil)
 	if err != nil {
 		t.Fatalf("buildGrants: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestBuildGrants_TrustHeaderWithTrustProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSecurityFlags: %v", err)
 	}
-	grants, _, _, _, err := buildGrants(cfg, "/", "127.0.0.1:7654", nil)
+	grants, _, _, _, err := buildGrants(cfg, "/", "127.0.0.1:7654", false, nil)
 	if err != nil {
 		t.Fatalf("buildGrants: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestBuildGrants_ClientCAAddsMTLSGrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSecurityFlags: %v", err)
 	}
-	grants, _, _, _, err := buildGrants(cfg, "/", "127.0.0.1:7654", nil)
+	grants, _, _, _, err := buildGrants(cfg, "/", "127.0.0.1:7654", false, nil)
 	if err != nil {
 		t.Fatalf("buildGrants: %v", err)
 	}

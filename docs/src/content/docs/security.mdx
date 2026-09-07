@@ -1,0 +1,87 @@
+---
+title: Security
+description: The three invariants, the bind guard, the threat model, and the one caveat that matters most.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+ditty's default mode of failure is *catastrophic*: it hands a shell to whoever loads a URL. The design assumes the operator will make a mistake, and makes the safe thing the lazy thing. Read this page before you bind ditty to anything but loopback.
+
+## The three invariants
+
+**I1 — Read-only by default.** Without `-w`/`--writable`, `Input` frames are discarded server-side, in the Hub, before they ever reach the PTY. This is not a UI restriction — the browser cannot enable writing by itself, no matter what it sends.
+
+**I2 — The bind guard.** Binding to anything other than loopback or a Unix socket *requires* a Grant. If none is configured, ditty refuses to start:
+
+```
+  ditty: refusing to listen on 0.0.0.0:7654 without authentication.
+
+  This would expose `bash` to your entire network.
+
+  Pick one:
+    --token                  random URL token (printed at startup)
+    --basic-auth user:pass   HTTP basic authentication
+    --auth-db ditty.db       SQLite users + JWT login page
+    --client-ca ca.pem       mutual TLS
+    --trust-header X-User    delegate to your reverse proxy
+    --insecure-no-auth       I understand; do it anyway
+```
+
+`--insecure-no-auth` proceeds, but logs a `WARN` every 60 seconds for as long as the process runs — this isn't a flag you flip once and forget about.
+
+**I3 — Tokens are default-on.** Even on loopback, `--token` is implied unless you pass `--no-token`. Zero-config stays zero-config — the startup banner prints the complete URL, and `--open` launches a browser at it — while still closing off "another local user curled my shell".
+
+## Grant types
+
+Any one Grant passing admits the Client; multiple Grants can be active at once.
+
+| Grant | Flag | Notes |
+|---|---|---|
+| Token | `--token[=value]` | Random bytes from `crypto/rand`, base32-encoded (`--token-length`, minimum 8 bytes). Exchanged for a cookie via the path, never a query string. Constant-time compare. |
+| Basic | `--basic-auth user:pass` | Also `DITTY_BASIC_AUTH`. Constant-time compare. Refused over plaintext on a non-loopback address unless `--insecure-basic-over-http`. |
+| JWT + SQLite | `--auth-db path` | HS256, 15-minute access cookie, rotating refresh cookie. Manage users with `ditty users add`. See [Configuration](/configuration/). |
+| mTLS | `--client-ca ca.pem` | Requires `--tls-cert`/`--tls-key`. The certificate's subject CN becomes the Client's label. |
+| Trusted header | `--trust-header X-Auth-User` | For nginx, oauth2-proxy, Cloudflare Access. Only honored when the peer address is inside `--trust-proxy <cidr>` — which has no default, so this header is inert until you set one. |
+
+## Transport and origin
+
+- `--tls-cert`/`--tls-key` — TLS 1.2 minimum, TLS 1.3 preferred, modern cipher suites only.
+- `--origin-allow <regex>` — WebSocket `Origin` check. Default: only origins whose host matches the request's `Host` are allowed. Cross-origin upgrades are rejected with `403` by default — this is the defense against cross-site WebSocket hijacking, and it's on unless you turn it off.
+- `--trust-proxy <cidr>` — enables `X-Forwarded-*` parsing and the trusted-header Grant. Empty by default.
+- `--allow-iframe [origin]` — sets the `frame-ancestors` CSP directive; the default is `frame-ancestors 'none'`.
+
+## Command injection surfaces
+
+Two convenience features are remote-code-execution vectors if left wide open, so both ship off and narrow:
+
+- `--allow-url-args` — lets `?arg=` query values be appended to the Command's argv. Off by default. When enabled, `--arg-pattern <regex>` (default `^[A-Za-z0-9._/-]{1,64}$`) filters every value, caps at 8 arguments, and argv is never re-parsed by a shell.
+- `--header-env X-Foo:DITTY_FOO` — maps a request header into the child's environment. Explicit mapping only, no wildcards, values truncated to 4 KiB, names must match `^[A-Z][A-Z0-9_]*$`. `PATH`, `LD_*`, `DYLD_*`, `IFS`, `BASH_ENV`, `ENV`, `SHELL` and `PROMPT_COMMAND` can never be targeted — they're hard-blocked.
+
+## Privilege
+
+`--uid`/`--gid` set the child's credentials and are refused unless ditty itself is running as root. `--cwd` sets its working directory. Running ditty as root at all logs a `WARN` at startup pointing at the [Docker recipe](/recipes/sandboxed-shell/) instead. There is no sandbox built in — when the audience is untrusted, make `docker run` the Command rather than expecting ditty to isolate anything for you.
+
+## Threat model, stated
+
+| Threat | Mitigation | Residual |
+|---|---|---|
+| Network scanner finds the port | Bind guard (I2), token (I3), origin check | Token in someone's clipboard history |
+| Shoulder-surfed URL | Short-lived process, `--once`, `--detach-grace` | No expiry within a run (a link-TTL feature is on the roadmap) |
+| Malicious page opens a cross-site WebSocket | Origin check, on by default | Operator sets `--origin-allow '.*'` |
+| Viewer escalates to typist | I1 drops writes server-side | The Command itself is dangerous (`vim` → `:!sh`) — see below |
+| Client floods input | 64 KiB/s per-Client input rate limit, then close | — |
+| PTY output exfiltrates secrets | Operator's problem; `--scrollback-bytes 0` disables the ring | Session recordings (planned, not in v1.0.0) will need their own opt-in warning |
+
+## The vim caveat
+
+<Aside type="danger" title="Read-only does not mean safe to expose">
+"Read-only" means ditty won't relay keystrokes into the PTY. It does not mean the exposed program is safe to expose. `--writable` on `less` is a shell — `less` can be told to run `!sh` or open a pager that shells out, the same way `vim` can be told `:!sh`. If you wouldn't hand someone a shell directly, don't hand them `-w` on a program that can become one.
+</Aside>
+
+This is the single most important thing on this site. Read-only mode protects you from someone typing into your terminal. It does not protect you from a program that, once made writable, can turn "watching a pager" into "running arbitrary commands as you". Decide what you're sharing with the same care you'd use for `-w`, not less.
+
+## Next
+
+- [Configuration](/configuration/) for the full flag surface these Grants and settings live under.
+- [Recipes](/recipes/sandboxed-shell/) for sharing something with someone you don't fully trust.
+- [Deploying behind a proxy](/deploying-behind-a-proxy/) for the trusted-header setup end to end.

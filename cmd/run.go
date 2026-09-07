@@ -170,14 +170,24 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 	}
 
 	basePath := resolver.String("base-path")
-	addr := net.JoinHostPort(resolver.String("address"), strconv.Itoa(resolver.Int("port")))
 
-	grants, tokenGrant, jwtGrant, deferredWarnings, err := buildGrants(secCfg, basePath, addr, authStore)
+	sockCfg, err := resolveSocketConfig(fs, resolver)
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+	isUnixSocket := sockCfg.path != ""
+
+	addr := net.JoinHostPort(resolver.String("address"), strconv.Itoa(resolver.Int("port")))
+	if isUnixSocket {
+		addr = sockCfg.path
+	}
+
+	grants, tokenGrant, jwtGrant, deferredWarnings, err := buildGrants(secCfg, basePath, addr, isUnixSocket, authStore)
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
 
-	if err := security.BindGuard(addr, false, args[0], len(grants) > 0, secCfg.insecureNoAuth); err != nil {
+	if err := security.BindGuard(addr, isUnixSocket, args[0], len(grants) > 0, secCfg.insecureNoAuth); err != nil {
 		cmd.SilenceErrors = true
 		cmd.PrintErrln(err.Error())
 		return errSilent
@@ -195,12 +205,21 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 	}
 
 	var ln net.Listener
-	if tlsConfig != nil {
+	switch {
+	case isUnixSocket:
+		ln, err = listenUnix(sockCfg)
+		if err == nil && tlsConfig != nil {
+			ln = tls.NewListener(ln, tlsConfig)
+		}
+	case tlsConfig != nil:
 		ln, err = tls.Listen("tcp", addr, tlsConfig)
-	} else {
+	default:
 		ln, err = net.Listen("tcp", addr)
 	}
 	if err != nil {
+		if isUnixSocket {
+			return fmt.Errorf("run: %w", err)
+		}
 		return fmt.Errorf("run: listen on %s: %w", addr, err)
 	}
 
@@ -214,6 +233,13 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 	scheme := "http"
 	if tlsConfig != nil {
 		scheme = "https"
+	}
+	if isUnixSocket {
+		// ln.Addr().String() for a Unix listener is the socket path itself,
+		// so this naturally reads as "unix:///run/ditty.sock/term/..." — a
+		// Unix socket has no directly browsable URL; a fronting reverse
+		// proxy (SPEC.md §11's nginx recipe) is what turns this into one.
+		scheme = "unix"
 	}
 	url := fmt.Sprintf("%s://%s%s", scheme, ln.Addr().String(), normalizedBasePath)
 	if tokenGrant != nil {
@@ -403,7 +429,7 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 
 	logger.Info("ditty starting", "version", buildinfo.Version, "url", url)
 
-	if resolver.Bool("open") {
+	if resolver.Bool("open") && !isUnixSocket {
 		if err := browser.Open(url); err != nil {
 			logger.Warn("could not open browser", "error", err)
 		}
