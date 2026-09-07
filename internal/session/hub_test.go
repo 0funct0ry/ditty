@@ -315,6 +315,60 @@ func TestHub_SizingHandover(t *testing.T) {
 	})
 }
 
+func TestHub_HelloReportsShared(t *testing.T) {
+	sharedHub := newTestHub(t, newFakeProcess(), Options{Name: "deploy", Shared: true})
+	c := newFakeClient("c1")
+	_ = sharedHub.Attach(c)
+	if hello := waitForHello(t, c); !hello.Session.Shared {
+		t.Fatal("Hello.session.shared = false, want true for a Hub built with Options.Shared: true")
+	}
+
+	unsharedHub := newTestHub(t, newFakeProcess(), Options{Name: "deploy"})
+	c2 := newFakeClient("c1")
+	_ = unsharedHub.Attach(c2)
+	if hello2 := waitForHello(t, c2); hello2.Session.Shared {
+		t.Fatal("Hello.session.shared = true, want false when Options.Shared is left at its zero value")
+	}
+}
+
+// waitForHello polls c's snapshot until a Hello frame has actually been
+// delivered by the async per-Client writer goroutine (Attach only
+// guarantees the frame is queued, not delivered) and decodes it.
+func waitForHello(t *testing.T, c *fakeClient) wire.Hello {
+	t.Helper()
+	var hello wire.Hello
+	waitUntil(t, time.Second, func() bool {
+		for _, f := range decodeAll(t, c.snapshot()) {
+			if f.Op == wire.OpHello {
+				h, err := wire.DecodeHello(f.Payload)
+				if err != nil {
+					t.Fatalf("decode Hello: %v", err)
+				}
+				hello = h
+				return true
+			}
+		}
+		return false
+	})
+	return hello
+}
+
+func TestHub_HelloReportsFocus(t *testing.T) {
+	focusedHub := newTestHub(t, newFakeProcess(), Options{Name: "deploy", Focus: true})
+	c := newFakeClient("c1")
+	_ = focusedHub.Attach(c)
+	if hello := waitForHello(t, c); !hello.Policy.Focus {
+		t.Fatal("Hello.policy.focus = false, want true for a Hub built with Options.Focus: true")
+	}
+
+	unfocusedHub := newTestHub(t, newFakeProcess(), Options{Name: "deploy"})
+	c2 := newFakeClient("c1")
+	_ = unfocusedHub.Attach(c2)
+	if hello2 := waitForHello(t, c2); hello2.Policy.Focus {
+		t.Fatal("Hello.policy.focus = true, want false when Options.Focus is left at its zero value")
+	}
+}
+
 func TestHub_ReadOnly_DropsInputWithOneNotice(t *testing.T) {
 	p := newFakeProcess()
 	h := newTestHub(t, p, Options{Name: "deploy"})

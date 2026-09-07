@@ -58,7 +58,7 @@ func init() {
 // no persistent flags), so `ditty run -w bash` and the bare `ditty -w bash`
 // shortcut (§8.2) parse an identical flag surface without either command
 // inheriting the other's flags implicitly. Short letters claimed here:
-// p a b o v q f L t F s c k R C e l d E T U G N i y z Z x W g X K S u m M w
+// p a b o v q f L t F s c k R C e l j d E T U G N i y z Z x W g X K S u m M w
 // (see SPEC.md §8.1). Note shorthands are case-sensitive single runes, so
 // e.g. "t" (profile-theme) and "T" (term) are distinct and do not collide.
 func registerRunFlags(fs *pflag.FlagSet) {
@@ -90,6 +90,7 @@ func registerProfileFlags(fs *pflag.FlagSet) {
 	fs.BoolP("profile-copy-on-select", "C", true, "copy selected text to the clipboard automatically")
 	fs.StringP("profile-bell", "e", "none", "bell style: none, sound, visual")
 	fs.BoolP("profile-lock", "l", false, "force these Profile values and hide the settings drawer entirely")
+	fs.BoolP("focus", "j", false, "hide the chrome bar and status bar entirely, leaving only the terminal")
 }
 
 func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
@@ -149,12 +150,94 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 	}
 	name := resolver.String("name")
 	if name == "" {
-		name = sessionID
+		name = shortSessionName(sessionID)
 	}
 	title := expandTitle(resolver.String("title"), args)
 	writable := resolver.Bool("writable")
 	shared := resolver.Bool("shared")
 	once := resolver.Bool("once")
+
+	// Every piece of state the startup banner needs — address, Grants, TLS,
+	// the listener itself — is resolved and validated up front, so the
+	// banner can print before anything else happens: no Command is spawned
+	// and no log line is emitted until after it's on screen (see
+	// printBanner's own doc comment). This also means a bind-guard failure
+	// is now caught before --shared would otherwise have already spawned a
+	// Command for nothing.
+	originAllow, err := compileOriginAllow(resolver.String("origin-allow"))
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+
+	basePath := resolver.String("base-path")
+	addr := net.JoinHostPort(resolver.String("address"), strconv.Itoa(resolver.Int("port")))
+
+	grants, tokenGrant, jwtGrant, deferredWarnings, err := buildGrants(secCfg, basePath, addr, authStore)
+	if err != nil {
+		return fmt.Errorf("run: %w", err)
+	}
+
+	if err := security.BindGuard(addr, false, args[0], len(grants) > 0, secCfg.insecureNoAuth); err != nil {
+		cmd.SilenceErrors = true
+		cmd.PrintErrln(err.Error())
+		return errSilent
+	}
+
+	var tlsConfig *tls.Config
+	if secCfg.tlsCert != "" || secCfg.tlsKey != "" {
+		if secCfg.tlsCert == "" || secCfg.tlsKey == "" {
+			return fmt.Errorf("run: --tls-cert and --tls-key must be given together")
+		}
+		tlsConfig, err = security.TLSConfig(secCfg.tlsCert, secCfg.tlsKey, secCfg.clientCA)
+		if err != nil {
+			return fmt.Errorf("run: %w", err)
+		}
+	}
+
+	var ln net.Listener
+	if tlsConfig != nil {
+		ln, err = tls.Listen("tcp", addr, tlsConfig)
+	} else {
+		ln, err = net.Listen("tcp", addr)
+	}
+	if err != nil {
+		return fmt.Errorf("run: listen on %s: %w", addr, err)
+	}
+
+	normalizedBasePath := basePath
+	if normalizedBasePath == "" {
+		normalizedBasePath = "/"
+	}
+	if !strings.HasSuffix(normalizedBasePath, "/") {
+		normalizedBasePath += "/"
+	}
+	scheme := "http"
+	if tlsConfig != nil {
+		scheme = "https"
+	}
+	url := fmt.Sprintf("%s://%s%s", scheme, ln.Addr().String(), normalizedBasePath)
+	if tokenGrant != nil {
+		// SPEC.md §4.1: the banner's URL is the complete shareable one,
+		// token included, so zero-config stays zero-config (§6.1 I3).
+		url = fmt.Sprintf("%s://%s%st/%s", scheme, ln.Addr().String(), normalizedBasePath, tokenGrant.Token())
+	}
+
+	// The banner is the one thing printed before ditty does anything else.
+	// Every client count is 0 here — this prints before the listener has
+	// accepted its first connection.
+	printBanner(cmd.OutOrStdout(), bannerInfo{
+		version:   buildinfo.Version,
+		sessionID: sessionID,
+		command:   args[0],
+		url:       url,
+		access:    accessSummary(writable, grantNames(grants), 0),
+	})
+	for _, w := range deferredWarnings {
+		logger.Warn(w.msg, w.args...)
+	}
+	if secCfg.insecureNoAuth {
+		go warnInsecureNoAuth(ctx, logger)
+	}
 
 	// onceDone fires once --once's single Client's Command has ended,
 	// regardless of --shared, so ditty itself can exit the way gotty's
@@ -188,6 +271,7 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 			ID:              sessionID,
 			Name:            name,
 			Title:           title,
+			Shared:          true,
 			Cols:            resolver.Int("cols"),
 			Rows:            resolver.Int("rows"),
 			Server:          buildinfo.Version,
@@ -201,6 +285,7 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 			ExitOnDetach:    resolver.Bool("exit-on-detach"),
 			Profile:         profileJSON,
 			ProfileLock:     resolver.Bool("profile-lock"),
+			Focus:           resolver.Bool("focus"),
 			OnWriteDenied:   auditWriteDeniedFunc(authStore),
 		})
 		info = hub
@@ -263,9 +348,12 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 				FlushInterval:   resolver.Duration("flush-interval"),
 				// Always tear down once this Client leaves: per-Client mode
 				// has no reconnect-to-the-same-Command semantics.
-				Once:          true,
+				Once: true,
+				// Shared is left false (the zero value): this branch only
+				// runs without --shared.
 				Profile:       profileJSON,
 				ProfileLock:   resolver.Bool("profile-lock"),
+				Focus:         resolver.Bool("focus"),
 				OnWriteDenied: auditWriteDeniedFunc(authStore),
 			})
 			auditRecord(authStore, identity.Label, store.AuditStart)
@@ -286,39 +374,6 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 			err := server.Shutdown(shutdownCtx)
 			sessions.closeAll()
 			return err
-		}
-	}
-
-	originAllow, err := compileOriginAllow(resolver.String("origin-allow"))
-	if err != nil {
-		return fmt.Errorf("run: %w", err)
-	}
-
-	basePath := resolver.String("base-path")
-	addr := net.JoinHostPort(resolver.String("address"), strconv.Itoa(resolver.Int("port")))
-
-	grants, tokenGrant, jwtGrant, err := buildGrants(secCfg, basePath, addr, logger, authStore)
-	if err != nil {
-		return fmt.Errorf("run: %w", err)
-	}
-
-	if err := security.BindGuard(addr, false, args[0], len(grants) > 0, secCfg.insecureNoAuth); err != nil {
-		cmd.SilenceErrors = true
-		cmd.PrintErrln(err.Error())
-		return errSilent
-	}
-	if secCfg.insecureNoAuth {
-		go warnInsecureNoAuth(ctx, logger)
-	}
-
-	var tlsConfig *tls.Config
-	if secCfg.tlsCert != "" || secCfg.tlsKey != "" {
-		if secCfg.tlsCert == "" || secCfg.tlsKey == "" {
-			return fmt.Errorf("run: --tls-cert and --tls-key must be given together")
-		}
-		tlsConfig, err = security.TLSConfig(secCfg.tlsCert, secCfg.tlsKey, secCfg.clientCA)
-		if err != nil {
-			return fmt.Errorf("run: %w", err)
 		}
 	}
 
@@ -346,39 +401,7 @@ func execRun(cmd *cobra.Command, fs *pflag.FlagSet, args []string) error {
 		return fmt.Errorf("run: %w", err)
 	}
 
-	var ln net.Listener
-	if tlsConfig != nil {
-		ln, err = tls.Listen("tcp", addr, tlsConfig)
-	} else {
-		ln, err = net.Listen("tcp", addr)
-	}
-	if err != nil {
-		return fmt.Errorf("run: listen on %s: %w", addr, err)
-	}
-
-	normalizedBasePath := basePath
-	if normalizedBasePath == "" {
-		normalizedBasePath = "/"
-	}
-	if !strings.HasSuffix(normalizedBasePath, "/") {
-		normalizedBasePath += "/"
-	}
-	scheme := "http"
-	if tlsConfig != nil {
-		scheme = "https"
-	}
-	url := fmt.Sprintf("%s://%s%s", scheme, ln.Addr().String(), normalizedBasePath)
 	logger.Info("ditty starting", "version", buildinfo.Version, "url", url)
-	if tokenGrant != nil {
-		// SPEC.md §4.1's startup banner: print the complete shareable URL,
-		// token included, so zero-config stays zero-config (§6.1 I3).
-		shareURL := fmt.Sprintf("%s://%s%st/%s", scheme, ln.Addr().String(), normalizedBasePath, tokenGrant.Token())
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "ditty  %s\nsession   %s (%s)\nurl       %s\naccess    %s\n",
-			buildinfo.Version, sessionID, args[0], shareURL, accessSummary(writable))
-		url = shareURL
-	} else {
-		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "ditty  %s\n  url  %s\n", buildinfo.Version, url)
-	}
 
 	if resolver.Bool("open") {
 		if err := browser.Open(url); err != nil {
@@ -561,12 +584,31 @@ func compileOriginAllow(pattern string) (*regexp.Regexp, error) {
 	return re, nil
 }
 
-// randomSessionID generates the Session's own ID (SPEC.md §1) when --name
-// is not given.
+// randomSessionID generates a Session's own ID (SPEC.md §1): 16 hex
+// characters, used unconditionally (regardless of --name) as the
+// DITTY_SESSION env var, the Hub's Hello.session.id, log correlation, and,
+// in ditty's default per-Client mode, the key each connection's spawned
+// Command is tracked under while it's attached — every one of those needs
+// the full entropy above to actually avoid collisions.
 func randomSessionID() (string, error) {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// shortSessionName derives the fallback Hello.session.name shown in the UI
+// when --name is not given: the first 4 characters of the Session's own ID,
+// uppercased for readability (e.g. "5a72427b8c6ad5c1" -> "5A72"). This is
+// display-only — a prefix of the real ID, not a second identifier — so a
+// coincidental match between two unrelated ditty processes' short names is
+// purely cosmetic (two browser tabs could show the same label) and affects
+// nothing the real, full-entropy sessionID is relied on for.
+func shortSessionName(sessionID string) string {
+	const shortNameLen = 4
+	if len(sessionID) < shortNameLen {
+		return strings.ToUpper(sessionID)
+	}
+	return strings.ToUpper(sessionID[:shortNameLen])
 }

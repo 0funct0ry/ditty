@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"bytes"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,8 +112,7 @@ func TestBuildGrants_TokenAndBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSecurityFlags: %v", err)
 	}
-	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	grants, tokenGrant, _, err := buildGrants(cfg, "/", "0.0.0.0:7654", logger, nil)
+	grants, tokenGrant, _, _, err := buildGrants(cfg, "/", "0.0.0.0:7654", nil)
 	if err != nil {
 		t.Fatalf("buildGrants: %v", err)
 	}
@@ -125,6 +122,9 @@ func TestBuildGrants_TokenAndBasic(t *testing.T) {
 	if len(grants) != 2 {
 		t.Fatalf("grants = %d, want 2 (token + basic)", len(grants))
 	}
+	if names := grantNames(grants); len(names) != 2 || names[0] != "token" || names[1] != "basic-auth" {
+		t.Fatalf("grantNames(grants) = %v, want [token basic-auth]", names)
+	}
 }
 
 func TestBuildGrants_BasicOverPlaintextRefusedOnLAN(t *testing.T) {
@@ -133,8 +133,7 @@ func TestBuildGrants_BasicOverPlaintextRefusedOnLAN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSecurityFlags: %v", err)
 	}
-	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	if _, _, _, err := buildGrants(cfg, "/", "192.168.1.24:7654", logger, nil); err == nil {
+	if _, _, _, _, err := buildGrants(cfg, "/", "192.168.1.24:7654", nil); err == nil {
 		t.Fatal("buildGrants(--basic-auth over plaintext LAN, no override) = nil error, want error")
 	}
 }
@@ -145,17 +144,15 @@ func TestBuildGrants_TrustHeaderWithoutTrustProxyWarnsAndSkips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSecurityFlags: %v", err)
 	}
-	var buf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&buf, nil))
-	grants, _, _, err := buildGrants(cfg, "/", "127.0.0.1:7654", logger, nil)
+	grants, _, _, warnings, err := buildGrants(cfg, "/", "127.0.0.1:7654", nil)
 	if err != nil {
 		t.Fatalf("buildGrants: %v", err)
 	}
 	if len(grants) != 0 {
 		t.Fatalf("grants = %d, want 0 (trust-header without trust-proxy must never be constructed)", len(grants))
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("trust-proxy")) {
-		t.Fatal("expected a startup WARN mentioning trust-proxy")
+	if len(warnings) != 1 || !strings.Contains(warnings[0].msg, "trust-proxy") {
+		t.Fatalf("warnings = %v, want one deferred warning mentioning trust-proxy (buildGrants must not log directly — see the M13 startup-banner ordering rule)", warnings)
 	}
 }
 
@@ -167,8 +164,7 @@ func TestBuildGrants_TrustHeaderWithTrustProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSecurityFlags: %v", err)
 	}
-	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	grants, _, _, err := buildGrants(cfg, "/", "127.0.0.1:7654", logger, nil)
+	grants, _, _, _, err := buildGrants(cfg, "/", "127.0.0.1:7654", nil)
 	if err != nil {
 		t.Fatalf("buildGrants: %v", err)
 	}
@@ -183,13 +179,15 @@ func TestBuildGrants_ClientCAAddsMTLSGrant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSecurityFlags: %v", err)
 	}
-	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	grants, _, _, err := buildGrants(cfg, "/", "127.0.0.1:7654", logger, nil)
+	grants, _, _, _, err := buildGrants(cfg, "/", "127.0.0.1:7654", nil)
 	if err != nil {
 		t.Fatalf("buildGrants: %v", err)
 	}
 	if len(grants) != 1 {
 		t.Fatalf("grants = %d, want 1 (mTLS)", len(grants))
+	}
+	if names := grantNames(grants); len(names) != 1 || names[0] != "mTLS" {
+		t.Fatalf("grantNames(grants) = %v, want [mTLS]", names)
 	}
 }
 
@@ -355,10 +353,16 @@ func TestResolveSecurityFlags_JWTSecretFileMissing(t *testing.T) {
 }
 
 func TestAccessSummary(t *testing.T) {
-	if got := accessSummary(false); got != "read-only · token" {
-		t.Fatalf("accessSummary(false) = %q", got)
+	if got := accessSummary(false, []string{"token"}, 0); got != "read-only · token · 0 clients" {
+		t.Fatalf("accessSummary(false, [token], 0) = %q", got)
 	}
-	if got := accessSummary(true); got != "writable · token" {
-		t.Fatalf("accessSummary(true) = %q", got)
+	if got := accessSummary(true, []string{"token"}, 1); got != "read-write · token · 1 client" {
+		t.Fatalf("accessSummary(true, [token], 1) = %q", got)
+	}
+	if got := accessSummary(false, []string{"basic-auth", "mTLS"}, 3); got != "read-only · basic-auth+mTLS · 3 clients" {
+		t.Fatalf("accessSummary(false, [basic-auth mTLS], 3) = %q", got)
+	}
+	if got := accessSummary(true, nil, 0); got != "read-write · none · 0 clients" {
+		t.Fatalf("accessSummary(true, nil, 0) = %q, want the insecure-no-auth case to read \"none\"", got)
 	}
 }

@@ -22,11 +22,11 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Every quality gate (fmt, vet, lint, staticcheck, test, coverage)
-        run: make check
-
       - name: UI build
         run: make web-build
+
+      - name: Every quality gate (fmt, vet, lint, staticcheck, test, coverage)
+        run: make check
 
       - name: Bundle budget
         run: make bundle-check

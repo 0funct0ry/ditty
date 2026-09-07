@@ -6,6 +6,10 @@ export interface ChromeBarProps {
   connectionState: ConnectionState;
   writable: boolean;
   clientCount: number;
+  /** Whether this Session is running in --shared mode (SPEC.md §1) — the
+   * client-count badge below is shown only when this is true and more
+   * than one Client is attached; see App.tsx and SPEC.md §10. */
+  shared: boolean;
   /** Hides the settings button entirely under --profile-lock (SPEC.md
    * §10.2) — the control must be absent, not just disabled. */
   settingsHidden: boolean;
@@ -35,6 +39,7 @@ export function ChromeBar({
   connectionState,
   writable,
   clientCount,
+  shared,
   settingsHidden,
   onSettingsClick,
   onShareClick,
@@ -54,11 +59,13 @@ export function ChromeBar({
           writable ? "border-saffron text-saffron" : "border-[var(--ditty-chrome-border)] text-[var(--ditty-chrome-muted)]"
         }`}
       >
-        {writable ? "you can type" : "read-only"}
+        {writable ? "read-write" : "read-only"}
       </span>
-      <span className="hidden shrink-0 font-mono text-xs text-[var(--ditty-chrome-muted)] sm:inline">
-        {clientCount} watching
-      </span>
+      {shared && clientCount > 1 && (
+        <span className="hidden shrink-0 font-mono text-xs text-[var(--ditty-chrome-muted)] sm:inline">
+          {clientCount} watching
+        </span>
+      )}
       {!settingsHidden && (
         <button
           type="button"

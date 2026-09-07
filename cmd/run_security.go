@@ -63,11 +63,26 @@ func warnInsecureNoAuth(ctx context.Context, logger *slog.Logger) {
 }
 
 // accessSummary renders SPEC.md §4.1's startup-banner access line.
-func accessSummary(writable bool) string {
+// accessSummary renders SPEC.md §4.1's startup-banner access line: the
+// write mode, every Grant actually active (never hardcoded — see
+// grantNames), and the current Client count (always 0 at startup, since
+// the banner prints before the server accepts its first connection).
+// "read-write"/"read-only" matches the UI's own badge copy (ChromeBar.tsx)
+// rather than the older "writable", so the two surfaces agree.
+func accessSummary(writable bool, grants []string, clientCount int) string {
+	mode := "read-only"
 	if writable {
-		return "writable · token"
+		mode = "read-write"
 	}
-	return "read-only · token"
+	grantList := "none"
+	if len(grants) > 0 {
+		grantList = strings.Join(grants, "+")
+	}
+	noun := "clients"
+	if clientCount == 1 {
+		noun = "client"
+	}
+	return fmt.Sprintf("%s · %s · %d %s", mode, grantList, clientCount, noun)
 }
 
 // defaultTokenCookieTTL is the grant cookie's Max-Age (SPEC.md §4.1) until a
@@ -202,19 +217,30 @@ func resolveSecurityFlags(resolver *config.Resolver) (securityConfig, []string, 
 	return cfg, secrets, nil
 }
 
+// deferredWarning is a log line buildGrants would otherwise emit
+// immediately, held instead so the caller can flush it after the startup
+// banner has printed — every log message appears after the banner, never
+// interleaved above it (SPEC.md §4.1).
+type deferredWarning struct {
+	msg  string
+	args []any
+}
+
 // buildGrants turns a resolved securityConfig into the active Grant set
 // (SPEC.md §6.2: any one admits), the TokenGrant (nil when tokens are
 // disabled, kept separate from Grants because /t/:token and /api/logout
 // need its Exchange method specifically), and the JWTGrant (nil unless
 // authStore is non-nil, i.e. --auth-db was passed). address is the address
 // ditty is about to bind, used only to decide whether --basic-auth over
-// plaintext is refused (SPEC.md §6.2).
-func buildGrants(cfg securityConfig, basePath, address string, logger *slog.Logger, authStore *store.Store) (
-	security.Grants, *security.TokenGrant, *security.JWTGrant, error,
+// plaintext is refused (SPEC.md §6.2). It does no logging itself — any
+// warning is returned for the caller to log once the banner is up.
+func buildGrants(cfg securityConfig, basePath, address string, authStore *store.Store) (
+	security.Grants, *security.TokenGrant, *security.JWTGrant, []deferredWarning, error,
 ) {
 	var grants security.Grants
 	var tokenGrant *security.TokenGrant
 	var jwtGrant *security.JWTGrant
+	var warnings []deferredWarning
 
 	if cfg.tokenEnabled {
 		tokenGrant = security.NewTokenGrant(cfg.token, basePath, cfg.tlsCert != "", defaultTokenCookieTTL)
@@ -223,12 +249,12 @@ func buildGrants(cfg securityConfig, basePath, address string, logger *slog.Logg
 
 	if cfg.basicAuth != "" {
 		if cfg.tlsCert == "" && !cfg.insecureBasicOverHTTP && !security.IsLoopbackAddr(address) {
-			return nil, nil, nil, fmt.Errorf(
+			return nil, nil, nil, nil, fmt.Errorf(
 				"--basic-auth over plaintext on a non-loopback address requires --insecure-basic-over-http (SPEC.md §6.2)")
 		}
 		basicGrant, err := security.NewBasicGrant(cfg.basicAuth)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		grants = append(grants, basicGrant)
 	}
@@ -239,12 +265,14 @@ func buildGrants(cfg securityConfig, basePath, address string, logger *slog.Logg
 
 	if cfg.trustHeader != "" {
 		if len(cfg.trustProxy) == 0 {
-			logger.Warn("--trust-header set without --trust-proxy; the header will never be honoured",
-				"header", cfg.trustHeader)
+			warnings = append(warnings, deferredWarning{
+				msg:  "--trust-header set without --trust-proxy; the header will never be honoured",
+				args: []any{"header", cfg.trustHeader},
+			})
 		} else {
 			thGrant, err := security.NewTrustedHeaderGrant(cfg.trustHeader, cfg.trustProxy)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 			grants = append(grants, thGrant)
 		}
@@ -255,5 +283,29 @@ func buildGrants(cfg securityConfig, basePath, address string, logger *slog.Logg
 		grants = append(grants, jwtGrant)
 	}
 
-	return grants, tokenGrant, jwtGrant, nil
+	return grants, tokenGrant, jwtGrant, warnings, nil
+}
+
+// grantNames returns the short, human-readable name of every Grant
+// actually active, in the order buildGrants constructs them, for the
+// startup banner's access line. An empty result means no Grant is
+// configured at all (only reachable when the bind guard has separately
+// permitted no-auth: loopback, or --insecure-no-auth).
+func grantNames(grants security.Grants) []string {
+	names := make([]string, 0, len(grants))
+	for _, g := range grants {
+		switch g.(type) {
+		case *security.TokenGrant:
+			names = append(names, "token")
+		case *security.BasicGrant:
+			names = append(names, "basic-auth")
+		case *security.MTLSGrant:
+			names = append(names, "mTLS")
+		case *security.TrustedHeaderGrant:
+			names = append(names, "trust-header")
+		case *security.JWTGrant:
+			names = append(names, "auth-db")
+		}
+	}
+	return names
 }

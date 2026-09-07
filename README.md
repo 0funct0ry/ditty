@@ -13,10 +13,11 @@
 ditty shares a terminal over the web. It runs the command you give it, spawns a fresh PTY for each browser connection by default, and serves that terminal over HTTP and WebSocket, with no configuration file or setup step required to get a session running. A session is read-only unless you explicitly ask for `--writable`, and ditty refuses to bind to a non-loopback address until you configure an authentication method or explicitly opt out.
 
 ```bash
-ditty top
+ditty htop
 ```
 
 Running that prints a URL. Opening it shows a live, read-only view of `htop`. Nobody who has the link can type into the session unless you started ditty with `-w`.
+
 
 ## Installing
 

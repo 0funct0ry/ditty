@@ -51,6 +51,14 @@ type HelloSession struct {
 	Rows      int    `json:"rows"`
 	State     string `json:"state"`
 	StartedAt string `json:"startedAt"`
+	// Shared reports whether this Session is running in --shared mode (one
+	// Command/PTY fanned out to many Clients) rather than ditty's default
+	// of one fresh Command per Client (SPEC.md §1). The UI uses this to
+	// decide whether a Client-count badge is meaningful at all: in
+	// non-shared mode every Session has exactly one Client, always, so
+	// there is nothing a count could ever tell the Client that isn't
+	// already implied by being connected.
+	Shared bool `json:"shared"`
 }
 
 // HelloClient describes the receiving Client itself.
@@ -69,6 +77,11 @@ type HelloPolicy struct {
 	UnloadWarning     bool   `json:"unloadWarning"`
 	MaxClients        int    `json:"maxClients"`
 	ProfileLock       bool   `json:"profileLock"`
+	// Focus reports --focus: hide the chrome bar and status bar entirely,
+	// leaving only the terminal itself. Unlike ProfileLock (which hides one
+	// control), this is a full-chrome policy, so the UI must hide both bars
+	// outright rather than disabling something inside them.
+	Focus bool `json:"focus"`
 }
 
 // Roster is the Server -> Client payload for OpRoster.

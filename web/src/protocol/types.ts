@@ -26,6 +26,11 @@ export interface HelloSession {
   rows: number;
   state: SessionState;
   startedAt: string;
+  /** Whether this Session is running in --shared mode (one Command fanned
+   * out to many Clients) rather than ditty's default of one fresh Command
+   * per Client. Used to decide whether the chrome bar's client-count badge
+   * is meaningful at all — see App.tsx. */
+  shared: boolean;
 }
 
 export interface HelloClient {
@@ -42,6 +47,9 @@ export interface HelloPolicy {
   unloadWarning: boolean;
   maxClients: number;
   profileLock: boolean;
+  /** --focus: hide the chrome bar and status bar entirely, leaving only the
+   * terminal. See App.tsx. */
+  focus: boolean;
 }
 
 /** Server -> Client payload for ServerOpcode.Roster. */

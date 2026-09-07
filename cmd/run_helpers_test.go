@@ -176,6 +176,18 @@ func TestRandomSessionID_Unique(t *testing.T) {
 	}
 }
 
+func TestShortSessionName(t *testing.T) {
+	if got := shortSessionName("5a72427b8c6ad5c1"); got != "5A72" {
+		t.Fatalf("shortSessionName(%q) = %q, want %q", "5a72427b8c6ad5c1", got, "5A72")
+	}
+	if got := shortSessionName("ab"); got != "AB" {
+		t.Fatalf("shortSessionName(%q) = %q, want %q (shorter than 4 chars: uppercase as-is)", "ab", got, "AB")
+	}
+	if got := shortSessionName(""); got != "" {
+		t.Fatalf("shortSessionName(%q) = %q, want empty", "", got)
+	}
+}
+
 func TestStaticInfo_State(t *testing.T) {
 	if got := staticInfo("ready").State(); got != "ready" {
 		t.Errorf("State() = %q, want ready", got)

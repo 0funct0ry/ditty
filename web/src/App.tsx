@@ -125,6 +125,7 @@ export default function App() {
   const sessionName = hello?.session.name ?? "session";
   const sessionTitle = hello?.session.title ?? sessionName;
   const clientCount = roster?.count ?? (hello ? 1 : 0);
+  const focus = hello?.policy.focus ?? false;
 
   return (
     <div
@@ -154,17 +155,20 @@ export default function App() {
           onSubmit={(username, password) => void auth.login(username, password)}
         />
       )}
-      <ChromeBar
-        sessionName={sessionName}
-        title={sessionTitle}
-        connectionState={state}
-        writable={writable}
-        clientCount={clientCount}
-        settingsHidden={locked}
-        onSettingsClick={() => setSettingsOpen((v) => !v)}
-        onShareClick={() => setShareOpen((v) => !v)}
-        onSignOutClick={authRequired && auth.status === "authed" ? auth.logout : undefined}
-      />
+      {!focus && (
+        <ChromeBar
+          sessionName={sessionName}
+          title={sessionTitle}
+          connectionState={state}
+          writable={writable}
+          clientCount={clientCount}
+          shared={hello?.session.shared ?? false}
+          settingsHidden={locked}
+          onSettingsClick={() => setSettingsOpen((v) => !v)}
+          onShareClick={() => setShareOpen((v) => !v)}
+          onSignOutClick={authRequired && auth.status === "authed" ? auth.logout : undefined}
+        />
+      )}
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <Terminal
           profile={profile}
@@ -203,13 +207,15 @@ export default function App() {
           />
         )}
       </div>
-      <StatusBar
-        cols={liveDims?.cols ?? hello?.session.cols ?? 0}
-        rows={liveDims?.rows ?? hello?.session.rows ?? 0}
-        sizing={sizing}
-        startedAt={hello?.session.startedAt}
-        rosterNote={rosterNote}
-      />
+      {!focus && (
+        <StatusBar
+          cols={liveDims?.cols ?? hello?.session.cols ?? 0}
+          rows={liveDims?.rows ?? hello?.session.rows ?? 0}
+          sizing={sizing}
+          startedAt={hello?.session.startedAt}
+          rosterNote={rosterNote}
+        />
+      )}
     </div>
   );
 }

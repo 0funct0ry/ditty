@@ -39,6 +39,12 @@ type Options struct {
 
 	// ID, Name, Title describe the Session for Hello (SPEC.md §1).
 	ID, Name, Title string
+	// Shared reports whether this Session is the one-Command-shared-by-
+	// many-Clients model (--shared) rather than ditty's default of one
+	// fresh Command per Client, as reported in Hello.session.shared —
+	// purely informational for the UI (SPEC.md §10), it does not affect
+	// this Hub's own behavior.
+	Shared bool
 	// Cols, Rows are the Session's initial PTY size, as reported in Hello.
 	Cols, Rows int
 	// Server is the Hello.server value.
@@ -72,6 +78,10 @@ type Options struct {
 	// profileLock (SPEC.md §7, §10.2).
 	Profile     json.RawMessage
 	ProfileLock bool
+	// Focus seeds Hello.policy.focus (--focus): the UI hides its chrome bar
+	// and status bar entirely, purely a display policy with no effect on
+	// this Hub's own behavior.
+	Focus bool
 
 	// Clock is the time source for every lifecycle timer. Defaults to
 	// NewRealClock() when nil.
@@ -102,6 +112,7 @@ type Hub struct {
 	clock   Clock
 
 	id, name, title string
+	shared          bool
 	server          string
 	scrollback      int
 	chunkBytes      int
@@ -125,6 +136,7 @@ type Hub struct {
 	everAttached bool
 	profile      json.RawMessage
 	profileLock  bool
+	focus        bool
 	waitTimer    Timer
 	detachTimer  Timer
 
@@ -169,6 +181,7 @@ func NewHub(opts Options) *Hub {
 		id:            opts.ID,
 		name:          opts.Name,
 		title:         opts.Title,
+		shared:        opts.Shared,
 		server:        opts.Server,
 		scrollback:    scrollback,
 		chunkBytes:    chunkBytes,
@@ -188,6 +201,7 @@ func NewHub(opts Options) *Hub {
 		rows:        opts.Rows,
 		profile:     opts.Profile,
 		profileLock: opts.ProfileLock,
+		focus:       opts.Focus,
 		done:        make(chan struct{}),
 	}
 
@@ -269,6 +283,7 @@ func (h *Hub) Attach(c Client) error {
 			Rows:      h.rows,
 			State:     h.state,
 			StartedAt: h.startedAt.Format(time.RFC3339),
+			Shared:    h.shared,
 		},
 		Client: wire.HelloClient{ID: c.ID(), Label: c.Label(), Writable: c.Writable(), Sizing: sizing},
 		Policy: wire.HelloPolicy{
@@ -276,6 +291,7 @@ func (h *Hub) Attach(c Client) error {
 			Reconnect:   true,
 			MaxClients:  h.maxClients,
 			ProfileLock: h.profileLock,
+			Focus:       h.focus,
 		},
 		Profile: h.profile,
 	}
